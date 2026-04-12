@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useParams, useLocation, useNavigate, Link } from 'react-router-dom'
 import { ReactFlowProvider } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { flowchartsApi } from '../api/client'
@@ -12,11 +12,13 @@ type Tab = 'preview' | 'canvas'
 
 export default function FlowchartView() {
   const { shareId } = useParams<{ shareId: string }>()
+  const location = useLocation()
+  const navigate = useNavigate()
+  const tab: Tab = location.pathname.endsWith('/canvas') ? 'canvas' : 'preview'
   const [chartName, setChartName] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [ready, setReady] = useState(false)
-  const [tab, setTab] = useState<Tab>('preview')
 
   useEffect(() => {
     if (!shareId) return
@@ -83,15 +85,15 @@ export default function FlowchartView() {
           <span className="font-mono text-sm text-gray-700 truncate">{chartName}</span>
         </div>
         <div className="flex items-center gap-1 bg-gray-100 rounded-md p-0.5">
-          <TabBtn active={tab === 'preview'} onClick={() => setTab('preview')}>Preview</TabBtn>
-          <TabBtn active={tab === 'canvas'} onClick={() => setTab('canvas')}>Canvas</TabBtn>
+          <TabBtn active={tab === 'preview'} onClick={() => navigate(`/view/${shareId}/preview`, { replace: true })}>Preview</TabBtn>
+          <TabBtn active={tab === 'canvas'} onClick={() => navigate(`/view/${shareId}/canvas`, { replace: true })}>Canvas</TabBtn>
         </div>
       </header>
 
       {/* Content — reuse exact editor components */}
       {ready && tab === 'preview' && (
         <ReactFlowProvider key="preview">
-          <AnimationPlayer onClose={() => setTab('canvas')} hideClose topOffset={45} />
+          <AnimationPlayer onClose={() => navigate(`/view/${shareId}/canvas`, { replace: true })} hideClose topOffset={45} />
         </ReactFlowProvider>
       )}
       {ready && tab === 'canvas' && (

@@ -38,7 +38,8 @@ export default function App() {
       <Route path="/login" element={
         isAuthenticated() ? <Navigate to="/dashboard" replace /> : <Login />
       } />
-      <Route path="/view/:shareId" element={<FlowchartView />} />
+      <Route path="/view/:shareId/preview" element={<FlowchartView />} />
+      <Route path="/view/:shareId/canvas" element={<FlowchartView />} />
 
       {/* Flowchart editor — full-screen, no sidebar */}
       <Route

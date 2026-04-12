@@ -150,7 +150,7 @@ export default function FlowCanvas({ presentationMode = false, readOnly = false,
       const res = await flowchartsApi.toggleShare(activeChartId)
       setShareId(res.data.share_id)
       if (res.data.share_id) {
-        const url = `${window.location.origin}/view/${res.data.share_id}`
+        const url = `${window.location.origin}/view/${res.data.share_id}/preview`
         await navigator.clipboard.writeText(url)
         const { default: toast } = await import('react-hot-toast')
         toast.success('Share link copied!')
@@ -161,7 +161,7 @@ export default function FlowCanvas({ presentationMode = false, readOnly = false,
 
   const handleCopyShareLink = async () => {
     if (!shareId) return
-    const url = `${window.location.origin}/view/${shareId}`
+    const url = `${window.location.origin}/view/${shareId}/preview`
     await navigator.clipboard.writeText(url)
     const { default: toast } = await import('react-hot-toast')
     toast.success('Share link copied!')
