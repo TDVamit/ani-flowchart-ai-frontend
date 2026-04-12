@@ -298,7 +298,6 @@ export const AnimatedEdge = memo((props: EdgeProps) => {
     : animation?.loop === 'finite' ? `${animation.loopCount}`
     : '1'
   const loopAttr = flowContent?.loop ? 'indefinite' : edgeLoopAttr
-  const dur = animation?.duration ?? 1
   const fcSpeed = flowContent?.speed ?? 2
 
   // ── Handle drag for segment control ──────────────────────────────────────────

@@ -556,7 +556,6 @@ export const useFlowchartStore = create<FlowchartStore>()((set, get) => ({
       if (newPosInElems === posInElems) return s
 
       // Build new nodes array: extract element nodes, reorder them, splice back
-      const nonElems = nodes.filter((n) => n.type !== 'element')
       const elems    = elemIndices.map((i) => nodes[i])
       const [moved]  = elems.splice(posInElems, 1)
       elems.splice(newPosInElems, 0, moved)

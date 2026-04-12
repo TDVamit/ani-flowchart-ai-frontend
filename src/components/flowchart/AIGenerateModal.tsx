@@ -203,7 +203,7 @@ export const AIGenerateModal = memo(({ onClose }: { onClose: () => void }) => {
         </div>
 
         {/* Status / error */}
-        {(busy || step === 'done') && (
+        {(busy || (step as Step) === 'done') && (
           <div style={{
             display: 'flex', alignItems: 'center', gap: 10,
             padding: '10px 14px',
