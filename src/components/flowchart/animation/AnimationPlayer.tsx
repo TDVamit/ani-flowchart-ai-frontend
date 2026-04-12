@@ -497,7 +497,7 @@ function EdgeOverlay({ frames, crossEdges, visibleIds, viewport, gRef, width, he
 
 // ── Main player ───────────────────────────────────────────────────────────────
 
-export const AnimationPlayer = memo(({ onClose }: { onClose: () => void }) => {
+export const AnimationPlayer = memo(({ onClose, hideClose, topOffset = 0 }: { onClose: () => void; hideClose?: boolean; topOffset?: number }) => {
   const nodes = useFlowchartStore(selectNodes)
   const edges = useFlowchartStore(selectEdges)
   const selectedNodeId = useFlowchartStore((s) => s.selectedNodeId)
@@ -509,7 +509,7 @@ export const AnimationPlayer = memo(({ onClose }: { onClose: () => void }) => {
   const rafRef = useRef<number | null>(null)  // requestAnimationFrame for viewport sync
 
   const playerW = window.innerWidth
-  const playerH = window.innerHeight - 60
+  const playerH = window.innerHeight - 60 - topOffset
 
   // ── Build world frames ──────────────────────────────────────────────────────
 
@@ -631,6 +631,8 @@ export const AnimationPlayer = memo(({ onClose }: { onClose: () => void }) => {
     }
     try {
       const vp = rfOuter.getViewport()
+      // Default viewport (no canvas mounted) — start from first frame
+      if (vp.x === 0 && vp.y === 0 && vp.zoom === 1) return 0
       const vpCx = (window.innerWidth * 0.5 - vp.x) / vp.zoom
       const vpCy = (window.innerHeight * 0.5 - vp.y) / vp.zoom
       let closest = 0, minDist = Infinity
@@ -703,10 +705,10 @@ export const AnimationPlayer = memo(({ onClose }: { onClose: () => void }) => {
   // ── Escape key ──────────────────────────────────────────────────────────────
 
   useEffect(() => {
-    function onKey(e: KeyboardEvent) { if (e.key === 'Escape') onClose() }
+    function onKey(e: KeyboardEvent) { if (e.key === 'Escape' && !hideClose) onClose() }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+  }, [onClose, hideClose])
 
   // ── Frame activation ─────────────────────────────────────────────────────────
 
@@ -908,9 +910,9 @@ export const AnimationPlayer = memo(({ onClose }: { onClose: () => void }) => {
 
   if (frames.length === 0) {
     return (
-      <div style={{ position: 'fixed', inset: 0, background: '#fff', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 16 }}>
+      <div style={{ position: 'fixed', top: topOffset, left: 0, right: 0, bottom: 0, background: '#fff', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 16 }}>
         <span style={{ color: '#94a3b8', fontFamily: 'IBM Plex Mono, monospace' }}>No screens yet.</span>
-        <button onClick={onClose} style={{ padding: '8px 20px', background: '#f1f5f9', border: '1px solid #e2e8f0', borderRadius: 5, color: '#475569', cursor: 'pointer', fontFamily: 'IBM Plex Mono, monospace' }}>Close</button>
+        {!hideClose && <button onClick={onClose} style={{ padding: '8px 20px', background: '#f1f5f9', border: '1px solid #e2e8f0', borderRadius: 5, color: '#475569', cursor: 'pointer', fontFamily: 'IBM Plex Mono, monospace' }}>Close</button>}
       </div>
     )
   }
@@ -920,7 +922,7 @@ export const AnimationPlayer = memo(({ onClose }: { onClose: () => void }) => {
   // ── Render ───────────────────────────────────────────────────────────────────
 
   return (
-    <div style={{ position: 'fixed', inset: 0, background: '#0f172a', zIndex: 200, display: 'flex', flexDirection: 'column' }}>
+    <div style={{ position: 'fixed', top: topOffset, left: 0, right: 0, bottom: 0, background: '#0f172a', zIndex: 200, display: 'flex', flexDirection: 'column' }}>
 
       {/* Canvas area */}
       <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
@@ -929,7 +931,7 @@ export const AnimationPlayer = memo(({ onClose }: { onClose: () => void }) => {
           <g ref={bgSvgRef} transform={`translate(${initialViewport.x},${initialViewport.y}) scale(${initialViewport.zoom})`}>
             {frames.map((f) => {
               const bg = f.data.backgroundColor || '#ffffff'
-              const ext = Math.max(f.canvasW, f.canvasH) * 0.6
+              const ext = Math.max(f.canvasW, f.canvasH) * 1.5
               return (
                 <rect
                   key={f.screenId}
@@ -974,7 +976,7 @@ export const AnimationPlayer = memo(({ onClose }: { onClose: () => void }) => {
       </div>
 
       {/* Controls */}
-      <div style={{ padding: '10px 24px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, background: 'rgba(15,23,42,0.95)', borderTop: '1px solid #1e293b', flexShrink: 0, height: 60 }}>
+      <div style={{ padding: '10px 12px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, flexWrap: 'wrap', background: 'rgba(15,23,42,0.95)', borderTop: '1px solid #1e293b', flexShrink: 0, minHeight: 52 }}>
         <CtrlBtn onClick={() => { setPlaying(false); goToFrame(Math.max(0, currentFrame - 1)) }} disabled={currentFrame === 0}>◀</CtrlBtn>
 
         <button onClick={togglePlay} style={{ padding: '7px 22px', background: '#6366f1', border: 'none', borderRadius: 5, color: '#fff', cursor: 'pointer', fontFamily: 'IBM Plex Mono, monospace', fontSize: 12, fontWeight: 700 }}>
@@ -1008,9 +1010,9 @@ export const AnimationPlayer = memo(({ onClose }: { onClose: () => void }) => {
           {frame?.data.label} ({currentFrame + 1}/{frames.length})
         </span>
 
-        <button onClick={onClose} style={{ marginLeft: 8, padding: '6px 14px', background: 'transparent', border: '1px solid #334155', borderRadius: 5, color: '#64748b', cursor: 'pointer', fontFamily: 'IBM Plex Mono, monospace', fontSize: 11 }}>
+        {!hideClose && <button onClick={onClose} style={{ marginLeft: 8, padding: '6px 14px', background: 'transparent', border: '1px solid #334155', borderRadius: 5, color: '#64748b', cursor: 'pointer', fontFamily: 'IBM Plex Mono, monospace', fontSize: 11 }}>
           Close
-        </button>
+        </button>}
       </div>
     </div>
   )

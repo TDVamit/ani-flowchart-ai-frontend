@@ -30,72 +30,20 @@ api.interceptors.response.use(
     // Redirect to login on 401
     if (err.response?.status === 401) {
       localStorage.removeItem('audit-auth');
-      if (!window.location.pathname.includes('/login') && !window.location.pathname.includes('/summary')) {
+      const path = window.location.pathname;
+      if (!path.includes('/login') && !path.startsWith('/view/') && path !== '/') {
         window.location.href = '/login';
       }
     }
-    const message = err.response?.data?.detail || err.message || 'An error occurred';
-    toast.error(message);
+    const path = window.location.pathname;
+    const isPublicPage = path.startsWith('/view/') || path === '/';
+    if (!isPublicPage) {
+      const message = err.response?.data?.detail || err.message || 'An error occurred';
+      toast.error(message);
+    }
     return Promise.reject(err);
   }
 );
-
-// Projects
-export const projectsApi = {
-  list: () => api.get('/api/projects'),
-  get: (id: string) => api.get(`/api/projects/${id}`),
-  create: (data: unknown) => api.post('/api/projects', data),
-  updateBrief: (id: string, brief: unknown) => api.put(`/api/projects/${id}/brief`, brief),
-  getContext: (id: string) => api.get(`/api/projects/${id}/context`),
-  resetContext: (id: string) => api.delete(`/api/projects/${id}/context`),
-};
-
-// Entries
-export const entriesApi = {
-  create: (data: unknown) => api.post('/api/entries', data),
-  get: (id: string) => api.get(`/api/entries/${id}`),
-  update: (id: string, data: unknown) => api.put(`/api/entries/${id}`, data),
-  listByProject: (projectId: string) => api.get(`/api/entries/project/${projectId}`),
-  addRecording: (entryId: string, recording: unknown) => api.post(`/api/entries/${entryId}/add-recording`, recording),
-  updateTranscript: (entryId: string, data: unknown) => api.put(`/api/entries/${entryId}/update-transcript`, data),
-  addDocument: (entryId: string, doc: unknown) => api.post(`/api/entries/${entryId}/add-document`, doc),
-};
-
-// Files
-export const filesApi = {
-  upload: (file: File, projectId: string, annotation?: string, fieldKey?: string) => {
-    const form = new FormData();
-    form.append('file', file);
-    form.append('project_id', projectId);
-    if (annotation) form.append('annotation', annotation);
-    if (fieldKey)   form.append('field_key', fieldKey);
-    return api.post('/api/files/upload', form, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    });
-  },
-  getBriefFiles: (projectId: string) =>
-    api.get(`/api/files/brief/${projectId}`),
-  getDownloadUrl: (fileId: string) =>
-    api.get(`/api/files/download/${fileId}`),
-  delete: (fileId: string) =>
-    api.delete(`/api/files/${fileId}`),
-};
-
-// Transcription
-export const transcriptionApi = {
-  transcribeFromR2: (fileId: string, language?: string, contextPrompt?: string) =>
-    api.post(`/api/transcription/audio/${fileId}`, { language, context_prompt: contextPrompt }),
-  saveManual: (transcript: string) =>
-    api.post('/api/transcription/manual', { transcript }),
-};
-
-// Analysis
-export const analysisApi = {
-  trigger: (data: unknown) => api.post('/api/analysis/trigger', data),
-  getStatus: (jobId: string) => api.get(`/api/analysis/status/${jobId}`),
-  getReport: (reportId: string) => api.get(`/api/analysis/report/${reportId}`),
-  listReports: (projectId: string) => api.get(`/api/analysis/reports/${projectId}`),
-};
 
 // Settings
 export const settingsApi = {
@@ -115,7 +63,9 @@ export const flowchartsApi = {
   get:    (id: string) => api.get(`/api/flowcharts/${id}`),
   update: (id: string, data: { name?: string; nodes?: unknown[]; edges?: unknown[] }) =>
     api.put(`/api/flowcharts/${id}`, data),
-  delete: (id: string) => api.delete(`/api/flowcharts/${id}`),
+  delete:    (id: string) => api.delete(`/api/flowcharts/${id}`),
+  toggleShare: (id: string) => api.post<{ share_id: string | null }>(`/api/flowcharts/${id}/share`),
+  getPublic: (shareId: string) => api.get(`/api/flowcharts/public/${shareId}`),
 };
 
 // Flowchart Assets (custom arrowhead images)
@@ -180,8 +130,3 @@ export const lordinconApi = {
   embed: (code: string) => api.get<{ lib: string; icon: string; key: string }>(`/api/lordicon/embed/${code}`),
 }
 
-// Public summary (no auth header needed but uses same client)
-export const summaryApi = {
-  listProjects: () => api.get('/api/summary/projects'),
-  getProject: (projectId: string) => api.get(`/api/summary/${projectId}`),
-};

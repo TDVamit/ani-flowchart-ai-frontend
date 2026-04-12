@@ -34,7 +34,7 @@ export default function FlowchartEditor() {
         <div style={{ fontSize: 36 }}>⬡</div>
         <div style={{ fontSize: 16, color: '#64748b' }}>Flowchart not found</div>
         <Link
-          to="/flowchart"
+          to="/dashboard"
           style={{ padding: '8px 20px', background: '#6366f1', borderRadius: 6, color: '#fff', textDecoration: 'none', fontSize: 13, fontWeight: 700 }}
         >
           Back to Flowcharts

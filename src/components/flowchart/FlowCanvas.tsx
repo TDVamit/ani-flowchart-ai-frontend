@@ -17,6 +17,7 @@ import '@xyflow/react/dist/style.css'
 
 import { useFlowchartStore, selectNodes, selectEdges, setAxisLock } from '../../store/useFlowchartStore'
 import type { FlowNode, FlowEdge } from '../../store/useFlowchartStore'
+import type { ScreenData } from '../../types/flowchart'
 import { ScreenNode }      from './nodes/ScreenNode'
 import { ElementNode }     from './nodes/ElementNode'
 import { AnimatedEdge }    from './edges/AnimatedEdge'
@@ -103,12 +104,13 @@ function RfCapture({ onReady }: { onReady: (rf: ReactFlowInstance) => void }) {
 
 interface FlowCanvasProps {
   presentationMode?: boolean
+  readOnly?: boolean
   presentationNodeStates?: Record<string, NodeAnimState>
   onRfReady?: (rf: ReactFlowInstance) => void
   presentationInitialViewport?: { x: number; y: number; zoom: number }
 }
 
-export default function FlowCanvas({ presentationMode = false, presentationNodeStates, onRfReady, presentationInitialViewport }: FlowCanvasProps) {
+export default function FlowCanvas({ presentationMode = false, readOnly = false, presentationNodeStates, onRfReady, presentationInitialViewport }: FlowCanvasProps) {
   const nodes = useFlowchartStore(selectNodes)
   const edges = useFlowchartStore(selectEdges)
   const { onNodesChange, onEdgesChange, onConnect, selectNode, selectEdge, saveChart, activeChartId, pasteElements, updateNode, pushHistory, undo, redo } = useFlowchartStore()
@@ -127,6 +129,43 @@ export default function FlowCanvas({ presentationMode = false, presentationNodeS
   const [showDebug,    setShowDebug]    = useState(false)
   const [snapGuides, setSnapGuides]   = useState<{ vx: number[]; hy: number[] }>({ vx: [], hy: [] })
   const [ctrlDown,   setCtrlDown]     = useState(false)
+  const [shareId,    setShareId]      = useState<string | null>(null)
+  const [shareLoading, setShareLoading] = useState(false)
+
+  // Load share_id on mount (skip on public/readOnly pages)
+  useEffect(() => {
+    if (!activeChartId || readOnly || presentationMode) return
+    import('../../api/client').then(({ flowchartsApi }) => {
+      flowchartsApi.get(activeChartId).then((res) => {
+        setShareId(res.data.share_id ?? null)
+      }).catch(() => {})
+    })
+  }, [activeChartId, readOnly, presentationMode])
+
+  const handleToggleShare = async () => {
+    if (!activeChartId) return
+    setShareLoading(true)
+    try {
+      const { flowchartsApi } = await import('../../api/client')
+      const res = await flowchartsApi.toggleShare(activeChartId)
+      setShareId(res.data.share_id)
+      if (res.data.share_id) {
+        const url = `${window.location.origin}/view/${res.data.share_id}`
+        await navigator.clipboard.writeText(url)
+        const { default: toast } = await import('react-hot-toast')
+        toast.success('Share link copied!')
+      }
+    } catch { /* handled by interceptor */ }
+    setShareLoading(false)
+  }
+
+  const handleCopyShareLink = async () => {
+    if (!shareId) return
+    const url = `${window.location.origin}/view/${shareId}`
+    await navigator.clipboard.writeText(url)
+    const { default: toast } = await import('react-hot-toast')
+    toast.success('Share link copied!')
+  }
 
   const screenCount  = useMemo(() => nodes.filter((n) => n.type === 'screen').length,  [nodes])
   const elementCount = useMemo(() => nodes.filter((n) => n.type === 'element').length, [nodes])
@@ -432,7 +471,7 @@ export default function FlowCanvas({ presentationMode = false, presentationNodeS
   }, [selectNode, selectEdge])
 
   async function handleSave() {
-    if (!activeChartId) return
+    if (!activeChartId || readOnly) return
     setSaving(true)
     try {
       await saveChart(activeChartId)
@@ -447,10 +486,10 @@ export default function FlowCanvas({ presentationMode = false, presentationNodeS
   const handleSaveRef = useRef(handleSave)
   handleSaveRef.current = handleSave
   useEffect(() => {
-    if (!autoSave) return
+    if (!autoSave || readOnly) return
     const id = setInterval(() => handleSaveRef.current(), 30_000)
     return () => clearInterval(id)
-  }, [autoSave])
+  }, [autoSave, readOnly])
 
   const bgVariant = BG_VARIANT[bgTexture]
 
@@ -490,6 +529,56 @@ export default function FlowCanvas({ presentationMode = false, presentationNodeS
             proOptions={{ hideAttribution: true }}
           >
             {onRfReady && <RfCapture onReady={onRfReady} />}
+          </ReactFlow>
+        </div>
+      </PresentationContext.Provider>
+    )
+  }
+
+  // ── Read-only mode: zoom/pan enabled, no editing ─────────────────────────────
+  if (readOnly) {
+    const roNodes = nodes.map((n) => ({
+      ...n,
+      selected: false,
+      draggable: false,
+      zIndex: n.type === 'screen' ? -1 : Math.max(1, (n.zIndex as number | undefined) ?? 1),
+    }))
+
+    // Focus on the first screen (by order/step) with some zoom-out
+    const firstScreen = nodes
+      .filter((n) => n.type === 'screen')
+      .sort((a, b) => ((a.data as ScreenData).order ?? 0) - ((b.data as ScreenData).order ?? 0))[0]
+
+    const fitViewOpts = firstScreen
+      ? { padding: 0.8, includeHiddenNodes: false, nodes: [{ id: firstScreen.id }] }
+      : { padding: 0.8 }
+
+    return (
+      <PresentationContext.Provider value={{ presentationMode: false, nodeStates: {}, showSteps: false, showDebug: false }}>
+        <div style={{ position: 'absolute', inset: 0, background: '#f8fafc' }}>
+          <ReactFlow
+            nodes={roNodes}
+            edges={edges}
+            nodeTypes={nodeTypes}
+            edgeTypes={edgeTypes}
+            defaultEdgeOptions={{ type: 'animatedEdge' }}
+            nodesDraggable={false}
+            nodesConnectable={false}
+            nodesFocusable={false}
+            elementsSelectable={false}
+            connectionMode={ConnectionMode.Loose}
+            panOnDrag
+            zoomOnScroll
+            zoomOnPinch
+            zoomOnDoubleClick={false}
+            fitView
+            fitViewOptions={fitViewOpts}
+            style={{ background: '#f8fafc' }}
+            proOptions={{ hideAttribution: true }}
+          >
+            {bgVariant && <Background variant={bgVariant} gap={16} size={1} color="#e2e8f0" />}
+            <Controls showInteractive={false} />
+            <MiniMap pannable zoomable style={{ border: '1px solid #e2e8f0' }} />
           </ReactFlow>
         </div>
       </PresentationContext.Provider>
@@ -558,9 +647,17 @@ export default function FlowCanvas({ presentationMode = false, presentationNodeS
             </span>
           )}
           <TopBtn onClick={handleSave}>{saving ? 'Saving…' : 'Save'}</TopBtn>
+          {shareId ? (
+            <>
+              <TopBtn onClick={handleCopyShareLink}>Copy Link</TopBtn>
+              <TopBtn onClick={handleToggleShare} danger>{shareLoading ? '…' : 'Unshare'}</TopBtn>
+            </>
+          ) : (
+            <TopBtn onClick={handleToggleShare}>{shareLoading ? '…' : 'Share'}</TopBtn>
+          )}
           <TopBtn onClick={() => setShowSteps(true)}>Steps</TopBtn>
           <TopBtn onClick={() => setShowPlayer(true)} primary>Preview</TopBtn>
-          <TopBtn onClick={() => navigate('/flowchart')} danger>Exit</TopBtn>
+          <TopBtn onClick={() => navigate('/dashboard')} danger>Exit</TopBtn>
         </div>
       </div>
 

@@ -1,34 +1,21 @@
 import { NavLink, useNavigate } from 'react-router-dom';
 import {
-  LayoutDashboard,
-  FileEdit,
-  FileText,
-  BookOpen,
-  Settings,
-  ChevronDown,
-  LogOut,
-  ExternalLink,
   Workflow,
+  Settings,
+  User,
+  LogOut,
 } from 'lucide-react';
-import { useAppStore } from '../../store/useAppStore';
 import { useAuthStore } from '../../store/useAuthStore';
 import clsx from 'clsx';
-import { useState } from 'react';
 
 const navItems = [
-  { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
-  { to: '/daily-input', icon: FileEdit, label: 'Daily Input' },
-  { to: '/reports', icon: FileText, label: 'Reports' },
-  { to: '/project-brief', icon: BookOpen, label: 'Project Brief' },
-  { to: '/flowchart', icon: Workflow, label: 'Flowchart' },
-  { to: '/settings', icon: Settings, label: 'Settings' },
+  { to: '/dashboard', icon: Workflow, label: 'Flowcharts' },
+  { to: '/dashboard/settings', icon: Settings, label: 'Settings' },
+  { to: '/dashboard/profile', icon: User, label: 'Profile' },
 ];
 
 export default function Sidebar() {
-  const { projects, activeProjectId, setActiveProject } = useAppStore();
   const { logout, username } = useAuthStore();
-  const activeProject = projects.find((p) => p._id === activeProjectId);
-  const [showSwitcher, setShowSwitcher] = useState(false);
   const navigate = useNavigate();
 
   return (
@@ -38,7 +25,7 @@ export default function Sidebar() {
         <div className="flex items-center gap-2">
           <div className="w-2 h-2 bg-indigo-500 flex-shrink-0" />
           <span className="font-mono text-sm font-bold text-gray-900 tracking-widest uppercase">
-            Field Intel
+            Flowchart AI
           </span>
         </div>
       </div>
@@ -49,7 +36,7 @@ export default function Sidebar() {
           <NavLink
             key={to}
             to={to}
-            end={to === '/'}
+            end={to === '/dashboard'}
             className={({ isActive }) =>
               clsx(
                 'flex items-center gap-3 px-3 py-2 text-sm transition-colors mb-0.5 rounded',
@@ -66,16 +53,7 @@ export default function Sidebar() {
       </nav>
 
       {/* Bottom actions */}
-      <div className="border-t border-[#e2e8f0] px-2 py-2 flex items-center justify-between">
-        <a
-          href="/summary"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex items-center gap-1.5 px-2 py-1.5 font-mono text-xs text-gray-500 hover:text-indigo-600 transition-colors"
-        >
-          <ExternalLink size={11} />
-          Summary
-        </a>
+      <div className="border-t border-[#e2e8f0] px-2 py-3">
         <button
           onClick={() => { logout(); navigate('/login'); }}
           className="flex items-center gap-1.5 px-2 py-1.5 font-mono text-xs text-gray-500 hover:text-red-500 transition-colors"
@@ -83,60 +61,6 @@ export default function Sidebar() {
           <LogOut size={11} />
           {username || 'Sign out'}
         </button>
-      </div>
-
-      {/* Active project indicator */}
-      <div className="border-t border-[#e2e8f0] p-3 bg-[#f8fafc]">
-        {activeProject ? (
-          <div>
-            <div
-              className="flex items-center justify-between cursor-pointer group"
-              onClick={() => setShowSwitcher(!showSwitcher)}
-            >
-              <div className="min-w-0">
-                <div className="font-mono text-xs text-indigo-600 uppercase tracking-wider truncate">
-                  {activeProject.brief.client_name}
-                </div>
-                <div className="text-xs text-gray-400 truncate mt-0.5">
-                  Week {activeProject.current_week} · Day {activeProject.current_day}
-                </div>
-              </div>
-              {projects.length > 1 && (
-                <ChevronDown
-                  size={14}
-                  className={clsx(
-                    'text-gray-400 flex-shrink-0 transition-transform',
-                    showSwitcher && 'rotate-180'
-                  )}
-                />
-              )}
-            </div>
-            {showSwitcher && projects.length > 1 && (
-              <div className="mt-2 border border-[#e2e8f0] bg-white rounded">
-                {projects.map((p) => (
-                  <button
-                    key={p._id}
-                    onClick={() => {
-                      setActiveProject(p._id);
-                      setShowSwitcher(false);
-                      navigate('/');
-                    }}
-                    className={clsx(
-                      'w-full text-left px-3 py-2 text-xs font-mono transition-colors',
-                      p._id === activeProjectId
-                        ? 'text-indigo-600 bg-indigo-50'
-                        : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
-                    )}
-                  >
-                    {p.brief.engagement_name}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        ) : (
-          <div className="text-xs text-gray-400 font-mono">No active project</div>
-        )}
       </div>
     </aside>
   );

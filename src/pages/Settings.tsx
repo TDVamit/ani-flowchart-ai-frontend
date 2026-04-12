@@ -12,14 +12,12 @@ import toast from 'react-hot-toast';
 export default function Settings() {
   const { selectedProvider, selectedModel, setSelectedModel } = useAppStore();
   const [providers, setProviders] = useState<LLMProvider[]>([]);
-  const [whisperConfigured, setWhisperConfigured] = useState(false);
   const [localProvider, setLocalProvider] = useState(selectedProvider);
   const [localModel, setLocalModel] = useState(selectedModel);
 
   useEffect(() => {
     settingsApi.getModels().then((res) => {
       setProviders(res.data.providers);
-      setWhisperConfigured(res.data.whisper_configured);
     });
   }, []);
 
@@ -27,9 +25,6 @@ export default function Settings() {
     setSelectedModel(localProvider, localModel);
     toast.success('Default model saved');
   };
-
-  const currentProviderModels =
-    providers.find((p) => p.id === localProvider)?.models || [];
 
   return (
     <div className="flex-1 flex flex-col bg-[#f8fafc] overflow-auto">
@@ -96,29 +91,6 @@ export default function Settings() {
           </div>
         </Card>
 
-        <Card title="Transcription (Whisper)">
-          <div className="flex items-center gap-2 mb-2">
-            {whisperConfigured ? (
-              <div className="flex items-center gap-2 text-green-400">
-                <CheckCircle size={13} />
-                <span className="font-mono text-sm">OpenAI Whisper configured</span>
-              </div>
-            ) : (
-              <div className="flex items-center gap-2 text-red-400">
-                <XCircle size={13} />
-                <span className="font-mono text-sm">OpenAI API key not set</span>
-              </div>
-            )}
-          </div>
-          {!whisperConfigured && (
-            <p className="text-xs text-[#64748b]">
-              Set <code className="text-indigo-600">OPENAI_API_KEY</code> in{' '}
-              <code className="text-indigo-600">backend/.env</code> to enable audio transcription.
-              Manual transcript entry works without this.
-            </p>
-          )}
-        </Card>
-
         <Card title="API Keys">
           <p className="text-sm text-[#64748b] leading-relaxed">
             API keys are configured in <code className="text-indigo-600 font-mono">backend/.env</code>.
@@ -126,7 +98,6 @@ export default function Settings() {
           </p>
           <div className="mt-3 bg-[#f8fafc] border border-[#e2e8f0] rounded p-3 font-mono text-xs text-[#64748b]">
             <div>ANTHROPIC_API_KEY=your_key_here</div>
-            <div>OPENAI_API_KEY=your_key_here</div>
             <div>GOOGLE_API_KEY=your_key_here</div>
           </div>
         </Card>

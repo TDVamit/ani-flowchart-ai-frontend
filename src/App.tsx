@@ -1,43 +1,24 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
-import { useEffect } from 'react';
 import Sidebar from './components/layout/Sidebar';
 import ProtectedRoute from './components/layout/ProtectedRoute';
-import Dashboard from './pages/Dashboard';
-import DailyInput from './pages/DailyInput';
-import Reports from './pages/Reports';
-import ProjectBrief from './pages/ProjectBrief';
 import Settings from './pages/Settings';
+import Profile from './pages/Profile';
 import Login from './pages/Login';
-import Summary from './pages/Summary';
+import Landing from './pages/Landing';
 import FlowchartList from './pages/FlowchartList';
 import FlowchartEditor from './pages/FlowchartEditor';
-import { useAppStore } from './store/useAppStore';
-import { projectsApi } from './api/client';
+import FlowchartView from './pages/FlowchartView';
 import { useAuthStore } from './store/useAuthStore';
 
 function AppLayout() {
-  const { setProjects, setActiveProject, activeProjectId } = useAppStore();
-
-  useEffect(() => {
-    projectsApi.list().then((res) => {
-      setProjects(res.data);
-      if (!activeProjectId && res.data.length > 0) {
-        setActiveProject(res.data[0]._id);
-      }
-    });
-  }, []);
-
   return (
     <div className="flex min-h-screen bg-white">
       <Sidebar />
       <main className="flex-1 flex flex-col min-w-0">
         <Routes>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/daily-input" element={<DailyInput />} />
-          <Route path="/reports" element={<Reports />} />
-          <Route path="/project-brief" element={<ProjectBrief />} />
+          <Route path="/" element={<FlowchartList />} />
           <Route path="/settings" element={<Settings />} />
-          <Route path="/flowchart" element={<FlowchartList />} />
+          <Route path="/profile" element={<Profile />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
@@ -46,16 +27,18 @@ function AppLayout() {
 }
 
 export default function App() {
-  const { isAuthenticated, logout } = useAuthStore();
-  void logout; // used indirectly via ProtectedRoute
+  const { isAuthenticated } = useAuthStore();
 
   return (
     <Routes>
       {/* Public routes */}
-      <Route path="/login" element={
-        isAuthenticated() ? <Navigate to="/" replace /> : <Login />
+      <Route path="/" element={
+        isAuthenticated() ? <Navigate to="/dashboard" replace /> : <Landing />
       } />
-      <Route path="/summary" element={<Summary />} />
+      <Route path="/login" element={
+        isAuthenticated() ? <Navigate to="/dashboard" replace /> : <Login />
+      } />
+      <Route path="/view/:shareId" element={<FlowchartView />} />
 
       {/* Flowchart editor — full-screen, no sidebar */}
       <Route
@@ -69,13 +52,16 @@ export default function App() {
 
       {/* Protected routes (with sidebar) */}
       <Route
-        path="/*"
+        path="/dashboard/*"
         element={
           <ProtectedRoute>
             <AppLayout />
           </ProtectedRoute>
         }
       />
+
+      {/* Catch-all */}
+      <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
 }
