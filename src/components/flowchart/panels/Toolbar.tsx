@@ -672,7 +672,7 @@ function Divider() {
 // ── Main toolbar ──────────────────────────────────────────────────────────────
 
 export const Toolbar = memo(() => {
-  const { addScreen, addElement } = useFlowchartStore()
+  const { addScreen, addElement, currentLevel } = useFlowchartStore()
   const rf = useReactFlow()
   const [flyout, setFlyout] = useState<{ id: string; top: number } | null>(null)
   const btnRefs = useRef<Record<string, HTMLButtonElement | null>>({})
@@ -722,8 +722,9 @@ export const Toolbar = memo(() => {
       }}>
         {/* Add Frame */}
         <button
-          title="Add Screen"
+          title={currentLevel > 1 ? 'Screens can only be added at Level 1' : 'Add Screen'}
           onClick={() => {
+            if (currentLevel > 1) return
             const newId = addScreen()
             if (newId) {
               setTimeout(() => {
@@ -741,14 +742,15 @@ export const Toolbar = memo(() => {
             background:    'transparent',
             border:        '1px solid transparent',
             borderRadius:   6,
-            color:         '#6366f1',
-            cursor:        'pointer',
+            color:         currentLevel > 1 ? '#cbd5e1' : '#6366f1',
+            cursor:        currentLevel > 1 ? 'not-allowed' : 'pointer',
+            opacity:       currentLevel > 1 ? 0.5 : 1,
           }}
-          onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = '#6366f10f' }}
+          onMouseEnter={(e) => { if (currentLevel <= 1) (e.currentTarget as HTMLButtonElement).style.background = '#6366f10f' }}
           onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}
         >
           <IconFrame />
-          <span style={{ fontSize: 6, fontFamily: 'IBM Plex Mono, monospace', color: '#6366f1', lineHeight: 1 }}>Screen</span>
+          <span style={{ fontSize: 6, fontFamily: 'IBM Plex Mono, monospace', color: currentLevel > 1 ? '#cbd5e1' : '#6366f1', lineHeight: 1 }}>Screen</span>
         </button>
 
         <Divider />

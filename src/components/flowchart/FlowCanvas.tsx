@@ -12,10 +12,11 @@ import {
   ConnectionMode,
   useReactFlow,
   ReactFlowInstance,
+  ReactFlowProvider,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 
-import { useFlowchartStore, selectNodes, selectEdges, setAxisLock } from '../../store/useFlowchartStore'
+import { useFlowchartStore, selectNodes, selectEdges, setAxisLock, selectCurrentLevel, selectLevelPath, nodesForLevel, edgesForNodes } from '../../store/useFlowchartStore'
 import type { FlowNode, FlowEdge } from '../../store/useFlowchartStore'
 import type { ScreenData } from '../../types/flowchart'
 import { ScreenNode }      from './nodes/ScreenNode'
@@ -100,24 +101,510 @@ function RfCapture({ onReady }: { onReady: (rf: ReactFlowInstance) => void }) {
   return null
 }
 
+// ── Level Switcher Button ────────────────────────────────────────────────────
+
+function LevelSwitcher({ allNodes, currentLevel, jumpToLevel }: {
+  allNodes: FlowNode[]
+  currentLevel: number
+  jumpToLevel: (level: number) => void
+}) {
+  const availableLevels = useMemo(() => {
+    const levels = new Set<number>()
+    for (const n of allNodes) {
+      if (n.type === 'screen') {
+        levels.add(((n.data as ScreenData).level ?? 1))
+      }
+    }
+    return Array.from(levels).sort((a, b) => a - b)
+  }, [allNodes])
+
+  const currentIdx = availableLevels.indexOf(currentLevel)
+  const total = availableLevels.length
+  const prevLevel = currentIdx > 0 ? availableLevels[currentIdx - 1] : null
+  const nextLevel = currentIdx < total - 1 ? availableLevels[currentIdx + 1] : null
+
+  // Animate only the text labels (prev, pill text, next) — not the pill shell
+  const prevRef = useRef<HTMLDivElement>(null)
+  const pillTextRef = useRef<HTMLDivElement>(null)
+  const nextRef = useRef<HTMLDivElement>(null)
+  const prevLevelRef = useRef(currentLevel)
+
+  useEffect(() => {
+    if (prevLevelRef.current === currentLevel) return
+    const dir = currentLevel > prevLevelRef.current ? 'up' : 'down'
+    prevLevelRef.current = currentLevel
+    const cls = `ls-anim-${dir}`
+    for (const ref of [prevRef, pillTextRef, nextRef]) {
+      const el = ref.current
+      if (!el) continue
+      el.classList.remove('ls-anim-up', 'ls-anim-down')
+      void el.offsetHeight
+      el.classList.add(cls)
+    }
+  }, [currentLevel])
+
+  if (total <= 1) return null
+
+  const mono = 'IBM Plex Mono, monospace'
+
+  return (
+    <div style={{
+      position: 'absolute', top: 12, right: 12, zIndex: 20,
+      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
+    }}>
+      {/* Previous neighbor — fixed-height slot so pill position stays constant */}
+      <div style={{ height: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+        {prevLevel !== null && (
+          <div ref={prevRef}>
+            <button
+              onClick={() => jumpToLevel(prevLevel)}
+              style={{
+                border: 'none', background: 'none', cursor: 'pointer', padding: 0,
+                display: 'flex', alignItems: 'center', gap: 4,
+                opacity: 0.55, transition: 'opacity 0.3s, transform 0.3s', transform: 'scale(0.9)',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.opacity = '0.9'; e.currentTarget.style.transform = 'scale(1)' }}
+              onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.55'; e.currentTarget.style.transform = 'scale(0.9)' }}
+            >
+              <div style={{ width: 7, height: 7, borderRadius: '50%', background: '#818cf8' }} />
+              <span style={{ fontFamily: mono, fontSize: 9, fontWeight: 600, color: '#818cf8', lineHeight: 1 }}>L{prevLevel}</span>
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Current level pill — shell is static, only inner text animates */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 5,
+        padding: '3px 8px 3px 5px', background: '#6366f1', borderRadius: 6,
+        overflow: 'hidden',
+      }}>
+        <div ref={pillTextRef} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+          <div style={{
+            width: 16, height: 16, borderRadius: 4,
+            background: 'rgba(255,255,255,0.2)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <span style={{ fontFamily: mono, fontSize: 9, fontWeight: 700, color: '#fff', lineHeight: 1 }}>{currentLevel}</span>
+          </div>
+          <span style={{ fontFamily: mono, fontSize: 9, fontWeight: 600, color: '#fff', whiteSpace: 'nowrap', lineHeight: 1, letterSpacing: '0.03em' }}>
+            L{currentLevel}
+          </span>
+        </div>
+      </div>
+
+      {/* Next neighbor — fixed-height slot */}
+      <div style={{ height: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+        {nextLevel !== null && (
+          <div ref={nextRef}>
+            <button
+              onClick={() => jumpToLevel(nextLevel)}
+              style={{
+                border: 'none', background: 'none', cursor: 'pointer', padding: 0,
+                display: 'flex', alignItems: 'center', gap: 4,
+                opacity: 0.5, transition: 'opacity 0.3s, transform 0.3s', transform: 'scale(0.9)',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.opacity = '0.85'; e.currentTarget.style.transform = 'scale(1)' }}
+              onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.5'; e.currentTarget.style.transform = 'scale(0.9)' }}
+            >
+              <div style={{ width: 7, height: 7, borderRadius: '50%', background: '#94a3b8' }} />
+              <span style={{ fontFamily: mono, fontSize: 9, fontWeight: 600, color: '#94a3b8', lineHeight: 1 }}>L{nextLevel}</span>
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ── Canvas View Overlay (read-only canvas, same as public link) ───────────────
+
+function CanvasViewOverlay({ onClose }: { onClose: () => void }) {
+  const allNodes = useFlowchartStore(selectNodes)
+  const allEdges = useFlowchartStore(selectEdges)
+  const [viewLevel, setViewLevel] = useState(1)
+  const [viewPath, setViewPath] = useState<Array<{ level: number; label: string; screenId?: string; sourceElementId?: string }>>([])
+  const [fitKey, setFitKey] = useState(0)
+  const [fitTargetId, setFitTargetId] = useState<string | null>(null)
+
+  const levelNodes = useMemo(() => nodesForLevel(allNodes, viewLevel), [allNodes, viewLevel])
+  const levelNodeIds = useMemo(() => new Set(levelNodes.map((n) => n.id)), [levelNodes])
+  const levelEdges = useMemo(() => edgesForNodes(allEdges, levelNodeIds), [allEdges, levelNodeIds])
+
+  const roNodes = levelNodes.map((n) => ({
+    ...n,
+    selected: false,
+    draggable: false,
+    zIndex: n.type === 'screen' ? -1 : Math.max(1, (n.zIndex as number | undefined) ?? 1),
+  }))
+
+  // Determine fitView target: specific screen/element, or first screen as fallback
+  const fitViewOpts = (() => {
+    if (fitTargetId) {
+      // Drilling down: focus on the specific screen
+      return { padding: 0.3, includeHiddenNodes: false, nodes: [{ id: fitTargetId }] }
+    }
+    const firstScreen = levelNodes
+      .filter((n) => n.type === 'screen')
+      .sort((a, b) => ((a.data as ScreenData).order ?? 0) - ((b.data as ScreenData).order ?? 0))[0]
+    return firstScreen
+      ? { padding: 0.8, includeHiddenNodes: false, nodes: [{ id: firstScreen.id }] }
+      : { padding: 0.8 }
+  })()
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { if (viewLevel > 1) { handleBack(); } else { onClose() } } }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose, viewLevel]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Listen for drill-down events from ElementNode expand icons
+  useEffect(() => {
+    const handler = (e: CustomEvent<{ elementId: string }>) => {
+      const elNode = allNodes.find((n) => n.id === e.detail.elementId)
+      if (!elNode) return
+      const expandedScreenId = (elNode.data as any).expandedScreenId // eslint-disable-line @typescript-eslint/no-explicit-any
+      if (!expandedScreenId) return
+      const screen = allNodes.find((n) => n.id === expandedScreenId)
+      if (!screen) return
+      const screenData = screen.data as ScreenData
+      const targetLevel = screenData.level ?? 1
+      setViewLevel(targetLevel)
+      setViewPath((p) => [...p, { level: targetLevel, label: screenData.label, screenId: expandedScreenId, sourceElementId: e.detail.elementId }])
+      setFitTargetId(expandedScreenId)
+      setFitKey((k) => k + 1)
+    }
+    window.addEventListener('fc-drill-down' as any, handler as any) // eslint-disable-line @typescript-eslint/no-explicit-any
+    return () => window.removeEventListener('fc-drill-down' as any, handler as any) // eslint-disable-line @typescript-eslint/no-explicit-any
+  }, [allNodes])
+
+  function handleBack() {
+    const currentEntry = viewPath[viewPath.length - 1]
+    const sourceElId = currentEntry?.sourceElementId
+    const targetLevel = viewPath.length <= 1 ? 1 : viewPath[viewPath.length - 2].level
+
+    if (viewPath.length <= 1) {
+      setViewLevel(1)
+      setViewPath([])
+    } else {
+      const newPath = viewPath.slice(0, -1)
+      setViewLevel(newPath[newPath.length - 1].level)
+      setViewPath(newPath)
+    }
+
+    // Find parent screen of source element to focus on it
+    if (sourceElId) {
+      const targetNodes = nodesForLevel(allNodes, targetLevel)
+      const sourceEl = targetNodes.find((n) => n.id === sourceElId)
+      if (sourceEl) {
+        const cx = sourceEl.position.x + (sourceEl.width ?? 120) / 2
+        const cy = sourceEl.position.y + (sourceEl.height ?? 50) / 2
+        const parentScreen = targetNodes.find((n) => {
+          if (n.type !== 'screen') return false
+          const sx = n.position.x, sy = n.position.y
+          const sw = n.width ?? 534, sh = n.height ?? 300
+          return cx >= sx && cx <= sx + sw && cy >= sy && cy <= sy + sh
+        })
+        if (parentScreen) {
+          setFitTargetId(parentScreen.id)
+          setFitKey((k) => k + 1)
+          return
+        }
+      }
+    }
+    setFitTargetId(null)
+    setFitKey((k) => k + 1)
+  }
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 100, background: '#f8fafc' }}>
+      {/* Header */}
+      <div style={{
+        position: 'absolute', top: 0, left: 0, right: 0, height: 45, zIndex: 10,
+        background: 'rgba(255,255,255,0.95)', backdropFilter: 'blur(8px)',
+        borderBottom: '1px solid #e5e7eb',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '0 16px',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {viewLevel > 1 && (
+            <button
+              onClick={handleBack}
+              style={{
+                padding: '3px 8px', background: 'none', border: '1px solid #c7d2fe',
+                borderRadius: 4, cursor: 'pointer', fontFamily: 'IBM Plex Mono, monospace',
+                fontSize: 10, color: '#6366f1', fontWeight: 600,
+              }}
+            >
+              &larr; Back
+            </button>
+          )}
+          <div style={{ width: 8, height: 8, borderRadius: 2, background: '#6366f1' }} />
+          <span style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: 12, fontWeight: 700, color: '#1e293b', letterSpacing: '0.08em' }}>
+            CANVAS VIEW
+          </span>
+        </div>
+        <button
+          onClick={onClose}
+          style={{
+            padding: '6px 14px', background: '#fff', border: '1px solid #e2e8f0', borderRadius: 5,
+            color: '#475569', cursor: 'pointer', fontFamily: 'IBM Plex Mono, monospace', fontSize: 12, fontWeight: 500,
+          }}
+        >
+          Close
+        </button>
+      </div>
+
+      {/* Canvas */}
+      <div style={{ position: 'absolute', inset: 0, paddingTop: 45 }}>
+        {/* Floating back button on canvas — outside ReactFlowProvider so it doesn't overlap header */}
+        {viewLevel > 1 && (
+          <button
+            onClick={handleBack}
+            style={{
+              position: 'absolute', top: 57, left: 12, zIndex: 30,
+              padding: '5px 12px', background: 'rgba(255,255,255,0.95)', border: '1px solid #c7d2fe',
+              borderRadius: 5, cursor: 'pointer', fontFamily: 'IBM Plex Mono, monospace',
+              fontSize: 11, color: '#6366f1', fontWeight: 600,
+              backdropFilter: 'blur(6px)', boxShadow: '0 1px 4px rgba(0,0,0,0.08)',
+            }}
+          >
+            &larr; Back
+          </button>
+        )}
+        {/* Level overlay indicator */}
+        <div style={{
+          position: 'absolute', top: 57, right: 12, zIndex: 30,
+          padding: '5px 12px', background: 'rgba(255,255,255,0.95)', border: '1px solid #c7d2fe',
+          borderRadius: 5, fontFamily: 'IBM Plex Mono, monospace', fontSize: 10,
+          color: '#6366f1', fontWeight: 700, backdropFilter: 'blur(6px)',
+          boxShadow: '0 1px 4px rgba(0,0,0,0.08)', pointerEvents: 'none',
+        }}>
+          Level {viewLevel}{viewPath.length > 0 ? ` - ${viewPath[viewPath.length - 1].label}` : ''}
+        </div>
+        <ReactFlowProvider key={fitKey}>
+          <PresentationContext.Provider value={{ presentationMode: false, nodeStates: {}, showSteps: false, showDebug: false }}>
+            <ReactFlow
+              nodes={roNodes}
+              edges={levelEdges}
+              nodeTypes={nodeTypes}
+              edgeTypes={edgeTypes}
+              defaultEdgeOptions={{ type: 'animatedEdge' }}
+              nodesDraggable={false}
+              nodesConnectable={false}
+              nodesFocusable={false}
+              elementsSelectable={false}
+              connectionMode={ConnectionMode.Loose}
+              panOnDrag
+              panOnScroll
+              zoomOnScroll={false}
+              zoomOnPinch={false}
+              zoomOnDoubleClick={false}
+              fitView
+              fitViewOptions={fitViewOpts}
+              style={{ background: '#f8fafc' }}
+              proOptions={{ hideAttribution: true }}
+            >
+              <Background variant={BackgroundVariant.Dots} gap={16} size={1} color="#e2e8f0" />
+              <Controls showInteractive={false} />
+              <MiniMap pannable zoomable style={{ border: '1px solid #e2e8f0' }} />
+            </ReactFlow>
+          </PresentationContext.Provider>
+        </ReactFlowProvider>
+      </div>
+    </div>
+  )
+}
+
+// ── Read-only canvas with level navigation ───────────────────────────────────
+
+function ReadOnlyCanvas({ allNodes, allEdges, bgVariant, topOffset = 0 }: {
+  allNodes: FlowNode[]
+  allEdges: FlowEdge[]
+  bgVariant: BackgroundVariant | null
+  topOffset?: number
+}) {
+  const [viewLevel, setViewLevel] = useState(1)
+  const [viewPath, setViewPath] = useState<Array<{ level: number; label: string; screenId?: string; sourceElementId?: string }>>([])
+  const [fitKey, setFitKey] = useState(0)
+  const [fitTargetId, setFitTargetId] = useState<string | null>(null)
+
+  const lvlNodes = useMemo(() => nodesForLevel(allNodes, viewLevel), [allNodes, viewLevel])
+  const lvlNodeIds = useMemo(() => new Set(lvlNodes.map((n) => n.id)), [lvlNodes])
+  const lvlEdges = useMemo(() => edgesForNodes(allEdges, lvlNodeIds), [allEdges, lvlNodeIds])
+
+  const roNodes = lvlNodes.map((n) => ({
+    ...n,
+    selected: false,
+    draggable: false,
+    zIndex: n.type === 'screen' ? -1 : Math.max(1, (n.zIndex as number | undefined) ?? 1),
+  }))
+
+  const fitViewOpts = (() => {
+    if (fitTargetId) {
+      // Drilling down: focus on the specific screen
+      return { padding: 0.3, includeHiddenNodes: false, nodes: [{ id: fitTargetId }] }
+    }
+    const firstScreen = lvlNodes
+      .filter((n) => n.type === 'screen')
+      .sort((a, b) => ((a.data as ScreenData).order ?? 0) - ((b.data as ScreenData).order ?? 0))[0]
+    return firstScreen
+      ? { padding: 0.8, includeHiddenNodes: false, nodes: [{ id: firstScreen.id }] }
+      : { padding: 0.8 }
+  })()
+
+  // Listen for drill-down events from ElementNode expand icons
+  useEffect(() => {
+    const handler = (e: CustomEvent<{ elementId: string }>) => {
+      const elNode = allNodes.find((n) => n.id === e.detail.elementId)
+      if (!elNode) return
+      const expandedScreenId = (elNode.data as any).expandedScreenId // eslint-disable-line @typescript-eslint/no-explicit-any
+      if (!expandedScreenId) return
+      const screen = allNodes.find((n) => n.id === expandedScreenId)
+      if (!screen) return
+      const screenData = screen.data as ScreenData
+      const targetLevel = screenData.level ?? 1
+      setViewLevel(targetLevel)
+      setViewPath((p) => [...p, { level: targetLevel, label: screenData.label, screenId: expandedScreenId, sourceElementId: e.detail.elementId }])
+      setFitTargetId(expandedScreenId)
+      setFitKey((k) => k + 1)
+    }
+    window.addEventListener('fc-drill-down' as any, handler as any) // eslint-disable-line @typescript-eslint/no-explicit-any
+    return () => window.removeEventListener('fc-drill-down' as any, handler as any) // eslint-disable-line @typescript-eslint/no-explicit-any
+  }, [allNodes])
+
+  function handleBack() {
+    const currentEntry = viewPath[viewPath.length - 1]
+    const sourceElId = currentEntry?.sourceElementId
+    const targetLevel = viewPath.length <= 1 ? 1 : viewPath[viewPath.length - 2].level
+
+    if (viewPath.length <= 1) {
+      setViewLevel(1)
+      setViewPath([])
+    } else {
+      const newPath = viewPath.slice(0, -1)
+      setViewLevel(newPath[newPath.length - 1].level)
+      setViewPath(newPath)
+    }
+
+    // Find parent screen of source element to focus on it
+    if (sourceElId) {
+      const targetNodes = nodesForLevel(allNodes, targetLevel)
+      const sourceEl = targetNodes.find((n) => n.id === sourceElId)
+      if (sourceEl) {
+        const cx = sourceEl.position.x + (sourceEl.width ?? 120) / 2
+        const cy = sourceEl.position.y + (sourceEl.height ?? 50) / 2
+        const parentScreen = targetNodes.find((n) => {
+          if (n.type !== 'screen') return false
+          const sx = n.position.x, sy = n.position.y
+          const sw = n.width ?? 534, sh = n.height ?? 300
+          return cx >= sx && cx <= sx + sw && cy >= sy && cy <= sy + sh
+        })
+        if (parentScreen) {
+          setFitTargetId(parentScreen.id)
+          setFitKey((k) => k + 1)
+          return
+        }
+      }
+    }
+    setFitTargetId(null)
+    setFitKey((k) => k + 1)
+  }
+
+  return (
+    <PresentationContext.Provider value={{ presentationMode: false, nodeStates: {}, showSteps: false, showDebug: false }}>
+      <div style={{ position: 'absolute', inset: 0, background: '#f8fafc' }} key={fitKey}>
+        {/* Back button */}
+        {viewLevel > 1 && (
+          <button
+            onClick={handleBack}
+            style={{
+              position: 'absolute', top: topOffset + 12, left: 12, zIndex: 10,
+              padding: '5px 12px', background: 'rgba(255,255,255,0.95)', border: '1px solid #c7d2fe',
+              borderRadius: 5, cursor: 'pointer', fontFamily: 'IBM Plex Mono, monospace',
+              fontSize: 11, color: '#6366f1', fontWeight: 600,
+              backdropFilter: 'blur(6px)', boxShadow: '0 1px 4px rgba(0,0,0,0.08)',
+            }}
+          >
+            &larr; Back
+          </button>
+        )}
+
+        {/* Level indicator overlay */}
+        <div style={{
+          position: 'absolute', top: topOffset + 12, right: 12, zIndex: 10,
+          padding: '5px 12px', background: 'rgba(255,255,255,0.95)', border: '1px solid #c7d2fe',
+          borderRadius: 5, fontFamily: 'IBM Plex Mono, monospace', fontSize: 10,
+          color: '#6366f1', fontWeight: 700, backdropFilter: 'blur(6px)',
+          boxShadow: '0 1px 4px rgba(0,0,0,0.08)', pointerEvents: 'none',
+        }}>
+          Level {viewLevel}{viewPath.length > 0 ? ` - ${viewPath[viewPath.length - 1].label}` : ''}
+        </div>
+
+        <ReactFlow
+          nodes={roNodes}
+          edges={lvlEdges}
+          nodeTypes={nodeTypes}
+          edgeTypes={edgeTypes}
+          defaultEdgeOptions={{ type: 'animatedEdge' }}
+          nodesDraggable={false}
+          nodesConnectable={false}
+          nodesFocusable={false}
+          elementsSelectable={false}
+          connectionMode={ConnectionMode.Loose}
+          panOnDrag
+          panOnScroll
+          zoomOnScroll={false}
+          zoomOnPinch={false}
+          zoomOnDoubleClick={false}
+          fitView
+          fitViewOptions={fitViewOpts}
+          style={{ background: '#f8fafc' }}
+          proOptions={{ hideAttribution: true }}
+        >
+          {bgVariant && <Background variant={bgVariant} gap={16} size={1} color="#e2e8f0" />}
+          <Controls showInteractive={false} />
+          <MiniMap pannable zoomable style={{ border: '1px solid #e2e8f0' }} />
+        </ReactFlow>
+      </div>
+    </PresentationContext.Provider>
+  )
+}
+
 // ── Main canvas ───────────────────────────────────────────────────────────────
 
 interface FlowCanvasProps {
   presentationMode?: boolean
   readOnly?: boolean
+  readOnlyTopOffset?: number
   presentationNodeStates?: Record<string, NodeAnimState>
   onRfReady?: (rf: ReactFlowInstance) => void
   presentationInitialViewport?: { x: number; y: number; zoom: number }
 }
 
-export default function FlowCanvas({ presentationMode = false, readOnly = false, presentationNodeStates, onRfReady, presentationInitialViewport }: FlowCanvasProps) {
-  const nodes = useFlowchartStore(selectNodes)
-  const edges = useFlowchartStore(selectEdges)
-  const { onNodesChange, onEdgesChange, onConnect, selectNode, selectEdge, saveChart, activeChartId, pasteElements, updateNode, pushHistory, undo, redo } = useFlowchartStore()
+export default function FlowCanvas({ presentationMode = false, readOnly = false, readOnlyTopOffset = 0, presentationNodeStates, onRfReady, presentationInitialViewport }: FlowCanvasProps) {
+  const allNodes = useFlowchartStore(selectNodes)
+  const allEdges = useFlowchartStore(selectEdges)
+  const currentLevel = useFlowchartStore(selectCurrentLevel)
+  const levelPath    = useFlowchartStore(selectLevelPath)
+  const { onNodesChange, onEdgesChange, onConnect, selectNode, selectEdge, saveChart, activeChartId, pasteElements, updateNode, pushHistory, undo, redo, drillUp, navigateToLevel, jumpToLevel } = useFlowchartStore()
+
+  // Rendered level lags behind currentLevel to allow exit animation on old content
+  const [renderLevel, setRenderLevel] = useState(currentLevel)
+
+  // Level-filtered nodes/edges for editor view (uses renderLevel, not currentLevel)
+  const levelNodes = useMemo(() => nodesForLevel(allNodes, renderLevel), [allNodes, renderLevel])
+  const levelNodeIds = useMemo(() => new Set(levelNodes.map((n) => n.id)), [levelNodes])
+  const levelEdges = useMemo(() => edgesForNodes(allEdges, levelNodeIds), [allEdges, levelNodeIds])
+
+  // Use all nodes for presentation/readOnly, level-filtered for editor
+  const nodes = (presentationMode || readOnly) ? allNodes : levelNodes
+  const edges = (presentationMode || readOnly) ? allEdges : levelEdges
 
   const rf = useReactFlow()
   const navigate = useNavigate()
   const [showPlayer,   setShowPlayer]   = useState(false)
+  const [showCanvasView, setShowCanvasView] = useState(false)
   const [showSteps,    setShowSteps]    = useState(false)
   const [showAIModal,  setShowAIModal]  = useState(false)
   const [saving,       setSaving]       = useState(false)
@@ -131,6 +618,117 @@ export default function FlowCanvas({ presentationMode = false, readOnly = false,
   const [ctrlDown,   setCtrlDown]     = useState(false)
   const [shareId,    setShareId]      = useState<string | null>(null)
   const [shareLoading, setShareLoading] = useState(false)
+
+  // Canvas zoom animation on level change
+  const [canvasScale, setCanvasScale] = useState(1)
+  const [canvasOpacity, setCanvasOpacity] = useState(1)
+  const [canvasTransition, setCanvasTransition] = useState('none')
+  const prevLevelAnimRef = useRef(currentLevel)
+  const animTimersRef = useRef<ReturnType<typeof setTimeout>[]>([])
+  const animContextRef = useRef<{ goingDeeper: boolean; drillBackElementId: string | null } | null>(null)
+  const prevLevelPathRef = useRef(levelPath)
+  useEffect(() => {
+    if (prevLevelAnimRef.current !== currentLevel) {
+      const goingDeeper = currentLevel > prevLevelAnimRef.current
+      prevLevelAnimRef.current = currentLevel
+      // Clear any pending timers
+      animTimersRef.current.forEach(clearTimeout)
+      animTimersRef.current = []
+
+      // Capture drill-back target NOW before levelPath changes are lost
+      let drillBackElementId: string | null = null
+      if (!goingDeeper && prevLevelPathRef.current.length > levelPath.length) {
+        const popped = prevLevelPathRef.current[prevLevelPathRef.current.length - 1]
+        drillBackElementId = popped?.sourceElementId ?? null
+      }
+      prevLevelPathRef.current = levelPath
+      animContextRef.current = { goingDeeper, drillBackElementId }
+
+      // Phase 1: zoom OLD content (renderLevel still shows old level)
+      setCanvasTransition('transform 0.28s cubic-bezier(0.4, 0, 0.8, 1), opacity 0.28s cubic-bezier(0.4, 0, 0.8, 1)')
+      setCanvasScale(goingDeeper ? 1.35 : 0.7)
+      setCanvasOpacity(0)
+
+      // Phase 2: swap content, temporarily remove scale so fitView measures correctly
+      const t1 = setTimeout(() => {
+        setCanvasTransition('none')
+        setCanvasScale(1)
+        setCanvasOpacity(0)
+        setRenderLevel(currentLevel)
+      }, 300)
+      animTimersRef.current.push(t1)
+    } else {
+      prevLevelPathRef.current = levelPath
+    }
+  }, [currentLevel, levelPath])
+
+  // Fit view to the specific target screen/element when rendered level changes
+  const prevRenderLevelRef = useRef(renderLevel)
+  useEffect(() => {
+    if (readOnly || presentationMode) return
+    if (prevRenderLevelRef.current !== renderLevel) {
+      prevRenderLevelRef.current = renderLevel
+      const ctx = animContextRef.current
+      const goingDeeper = ctx?.goingDeeper ?? true
+
+      setTimeout(() => {
+        let fitted = false
+
+        if (goingDeeper) {
+          // Drilling DOWN — focus on the target screen from levelPath
+          const lastEntry = levelPath[levelPath.length - 1]
+          if (lastEntry?.screenId) {
+            rf.fitView({ nodes: [{ id: lastEntry.screenId }], duration: 0, padding: 0.3 })
+            fitted = true
+          }
+        } else {
+          // Drilling UP — focus on the screen containing the source element
+          const sourceElId = ctx?.drillBackElementId ?? null
+          if (sourceElId) {
+            const sourceEl = levelNodes.find((n) => n.id === sourceElId)
+            if (sourceEl) {
+              const cx = sourceEl.position.x + (sourceEl.width ?? 120) / 2
+              const cy = sourceEl.position.y + (sourceEl.height ?? 50) / 2
+              const parentScreen = levelNodes.find((n) => {
+                if (n.type !== 'screen') return false
+                const sx = n.position.x, sy = n.position.y
+                const sw = n.width ?? 534, sh = n.height ?? 300
+                return cx >= sx && cx <= sx + sw && cy >= sy && cy <= sy + sh
+              })
+              if (parentScreen) {
+                rf.fitView({ nodes: [{ id: parentScreen.id }], duration: 0, padding: 0.1 })
+                fitted = true
+              }
+            }
+          }
+        }
+
+        // Fallback: fit all screens at this level
+        if (!fitted) {
+          const lvlScreens = levelNodes.filter((n) => n.type === 'screen')
+          if (lvlScreens.length > 0) {
+            rf.fitView({ nodes: lvlScreens.map((n) => ({ id: n.id })), duration: 0, padding: 0.15 })
+          }
+        }
+
+        // After fitView, start phase 3 zoom-in animation
+        if (ctx) {
+          animContextRef.current = null
+          requestAnimationFrame(() => {
+            setCanvasScale(goingDeeper ? 0.55 : 1.45)
+            setCanvasOpacity(0)
+            requestAnimationFrame(() => {
+              requestAnimationFrame(() => {
+                setCanvasTransition('transform 0.7s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.5s ease-out')
+                setCanvasScale(1)
+                setCanvasOpacity(1)
+              })
+            })
+          })
+        }
+      }, 50)
+    }
+  }, [renderLevel, levelNodes, levelPath, readOnly, presentationMode, rf])
 
   // Load share_id on mount (skip on public/readOnly pages)
   useEffect(() => {
@@ -537,52 +1135,7 @@ export default function FlowCanvas({ presentationMode = false, readOnly = false,
 
   // ── Read-only mode: zoom/pan enabled, no editing ─────────────────────────────
   if (readOnly) {
-    const roNodes = nodes.map((n) => ({
-      ...n,
-      selected: false,
-      draggable: false,
-      zIndex: n.type === 'screen' ? -1 : Math.max(1, (n.zIndex as number | undefined) ?? 1),
-    }))
-
-    // Focus on the first screen (by order/step) with some zoom-out
-    const firstScreen = nodes
-      .filter((n) => n.type === 'screen')
-      .sort((a, b) => ((a.data as ScreenData).order ?? 0) - ((b.data as ScreenData).order ?? 0))[0]
-
-    const fitViewOpts = firstScreen
-      ? { padding: 0.8, includeHiddenNodes: false, nodes: [{ id: firstScreen.id }] }
-      : { padding: 0.8 }
-
-    return (
-      <PresentationContext.Provider value={{ presentationMode: false, nodeStates: {}, showSteps: false, showDebug: false }}>
-        <div style={{ position: 'absolute', inset: 0, background: '#f8fafc' }}>
-          <ReactFlow
-            nodes={roNodes}
-            edges={edges}
-            nodeTypes={nodeTypes}
-            edgeTypes={edgeTypes}
-            defaultEdgeOptions={{ type: 'animatedEdge' }}
-            nodesDraggable={false}
-            nodesConnectable={false}
-            nodesFocusable={false}
-            elementsSelectable={false}
-            connectionMode={ConnectionMode.Loose}
-            panOnDrag
-            zoomOnScroll
-            zoomOnPinch
-            zoomOnDoubleClick={false}
-            fitView
-            fitViewOptions={fitViewOpts}
-            style={{ background: '#f8fafc' }}
-            proOptions={{ hideAttribution: true }}
-          >
-            {bgVariant && <Background variant={bgVariant} gap={16} size={1} color="#e2e8f0" />}
-            <Controls showInteractive={false} />
-            <MiniMap pannable zoomable style={{ border: '1px solid #e2e8f0' }} />
-          </ReactFlow>
-        </div>
-      </PresentationContext.Provider>
-    )
+    return <ReadOnlyCanvas allNodes={allNodes} allEdges={allEdges} bgVariant={bgVariant} topOffset={readOnlyTopOffset} />
   }
 
   return (
@@ -656,13 +1209,82 @@ export default function FlowCanvas({ presentationMode = false, readOnly = false,
             <TopBtn onClick={handleToggleShare}>{shareLoading ? '…' : 'Share'}</TopBtn>
           )}
           <TopBtn onClick={() => setShowSteps(true)}>Steps</TopBtn>
+          <TopBtn onClick={() => setShowCanvasView(true)}>Canvas</TopBtn>
           <TopBtn onClick={() => setShowPlayer(true)} primary>Preview</TopBtn>
           <TopBtn onClick={() => navigate('/dashboard')} danger>Exit</TopBtn>
         </div>
       </div>
 
+      {/* ── Level breadcrumb bar ── */}
+      {currentLevel > 1 && (
+        <div style={{
+          position: 'absolute', top: 48, left: 0, right: 0, height: 32, zIndex: 20,
+          background: '#f0f0ff', borderBottom: '1px solid #e2e8f0',
+          display: 'flex', alignItems: 'center', padding: '0 16px', gap: 6,
+        }}>
+          <button
+            onClick={drillUp}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 4, padding: '2px 8px',
+              background: 'none', border: '1px solid #c7d2fe', borderRadius: 4,
+              cursor: 'pointer', fontFamily: 'IBM Plex Mono, monospace', fontSize: 10,
+              color: '#6366f1', fontWeight: 600,
+            }}
+          >
+            &larr; Back
+          </button>
+          <button
+            onClick={() => navigateToLevel(-1)}
+            style={{
+              background: 'none', border: 'none', cursor: 'pointer',
+              fontFamily: 'IBM Plex Mono, monospace', fontSize: 10, color: '#6366f1',
+              fontWeight: 600, padding: '2px 4px',
+            }}
+          >
+            Level 1
+          </button>
+          {levelPath.map((entry, i) => (
+            <span key={i} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ color: '#94a3b8', fontSize: 10 }}>&rsaquo;</span>
+              <button
+                onClick={() => navigateToLevel(i)}
+                style={{
+                  background: 'none', border: 'none', cursor: 'pointer',
+                  fontFamily: 'IBM Plex Mono, monospace', fontSize: 10,
+                  color: i === levelPath.length - 1 ? '#1e293b' : '#6366f1',
+                  fontWeight: i === levelPath.length - 1 ? 700 : 500,
+                  padding: '2px 4px',
+                }}
+              >
+                L{entry.level}: {entry.label}
+              </button>
+            </span>
+          ))}
+          <span style={{
+            marginLeft: 'auto', fontFamily: 'IBM Plex Mono, monospace',
+            fontSize: 9, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.08em',
+          }}>
+            Depth {currentLevel}
+          </span>
+        </div>
+      )}
+
       {/* ── React Flow canvas ── */}
-      <div style={{ position: 'absolute', top: 48, left: 62, right: 230, bottom: 0 }}>
+      <div style={{
+        position: 'absolute', top: currentLevel > 1 ? 80 : 48, left: 62, right: 230, bottom: 0,
+        transition: 'top 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+      }}>
+        {/* Level timeline — outside animated wrapper so it doesn't zoom */}
+        <LevelSwitcher allNodes={allNodes} currentLevel={currentLevel} jumpToLevel={jumpToLevel} />
+        {/* Animated canvas wrapper */}
+        <div style={{
+          width: '100%', height: '100%', position: 'relative',
+          transform: `scale(${canvasScale})`,
+          opacity: canvasOpacity,
+          transition: canvasTransition,
+          transformOrigin: 'center center',
+          willChange: 'transform, opacity',
+        }}>
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -718,10 +1340,11 @@ export default function FlowCanvas({ presentationMode = false, readOnly = false,
             pointerEvents: 'none', zIndex: 30,
           }} />
         ))}
+        </div>{/* end animated canvas wrapper */}
       </div>
 
       {/* ── Left toolbar ── */}
-      <div style={{ position: 'absolute', top: 48, left: 0, width: 62, bottom: 0, zIndex: 20, pointerEvents: 'none' }}>
+      <div style={{ position: 'absolute', top: currentLevel > 1 ? 80 : 48, left: 0, width: 62, bottom: 0, zIndex: 20, pointerEvents: 'none' }}>
         <div style={{ pointerEvents: 'all', position: 'relative', height: '100%' }}>
           <Toolbar />
         </div>
@@ -730,7 +1353,7 @@ export default function FlowCanvas({ presentationMode = false, readOnly = false,
       {/* ── Right config panel ── */}
       <div style={{
         position:      'absolute',
-        top:           48,
+        top:           currentLevel > 1 ? 80 : 48,
         right:         0,
         width:         230,
         bottom:        0,
@@ -774,9 +1397,11 @@ export default function FlowCanvas({ presentationMode = false, readOnly = false,
         .react-flow__controls button:hover { background: #f8fafc !important; }
         .react-flow__handle { transition: opacity .12s; }
         .react-flow__node:hover .fc-handle { opacity: 1 !important; }
+
       `}</style>
 
       {showPlayer   && <AnimationPlayer onClose={() => setShowPlayer(false)} />}
+      {showCanvasView && <CanvasViewOverlay onClose={() => setShowCanvasView(false)} />}
       {showSteps    && <StepViewer     onClose={() => setShowSteps(false)}  />}
       {showAIModal  && <AIGenerateModal onClose={() => setShowAIModal(false)} />}
     </div>

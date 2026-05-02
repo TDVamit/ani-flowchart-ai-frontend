@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { ReactFlowProvider, ReactFlowInstance, useReactFlow } from '@xyflow/react'
-import { useFlowchartStore, selectNodes, selectEdges } from '../../../store/useFlowchartStore'
+import { useFlowchartStore, selectNodes, selectEdges, selectCurrentLevel, nodesForLevel, edgesForNodes } from '../../../store/useFlowchartStore'
 import type { ScreenData, ElementData, EdgeData } from '../../../types/flowchart'
 import { ASPECT_RATIO_SIZES } from '../../../types/flowchart'
 import { getBezierPath, getStraightPath, Position } from '@xyflow/system'
@@ -497,10 +497,17 @@ function EdgeOverlay({ frames, crossEdges, visibleIds, viewport, gRef, width, he
 
 // ── Main player ───────────────────────────────────────────────────────────────
 
-export const AnimationPlayer = memo(({ onClose, hideClose, topOffset = 0 }: { onClose: () => void; hideClose?: boolean; topOffset?: number }) => {
-  const nodes = useFlowchartStore(selectNodes)
-  const edges = useFlowchartStore(selectEdges)
+export const AnimationPlayer = memo(({ onClose, hideClose, topOffset = 0, level }: { onClose: () => void; hideClose?: boolean; topOffset?: number; level?: number }) => {
+  const allNodes = useFlowchartStore(selectNodes)
+  const allEdges = useFlowchartStore(selectEdges)
+  const currentLevel = useFlowchartStore(selectCurrentLevel)
   const selectedNodeId = useFlowchartStore((s) => s.selectedNodeId)
+
+  // Filter nodes/edges by level (use prop or store level; default 1)
+  const playLevel = level ?? currentLevel
+  const nodes = useMemo(() => nodesForLevel(allNodes, playLevel), [allNodes, playLevel])
+  const nodeIds = useMemo(() => new Set(nodes.map((n) => n.id)), [nodes])
+  const edges = useMemo(() => edgesForNodes(allEdges, nodeIds), [allEdges, nodeIds])
 
   const camTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)

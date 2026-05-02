@@ -1,8 +1,14 @@
-import { memo, useEffect, useRef, useState } from 'react'
-import { NodeProps, Handle, Position, NodeResizer } from '@xyflow/react'
-import type { ElementData, PremadeLayout, TextPosition } from '../../../types/flowchart'
-import { useFlowchartStore } from '../../../store/useFlowchartStore'
-import { usePresentationContext } from '../PresentationContext'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { NodeProps, Handle, Position, NodeResizer, ReactFlow, ReactFlowProvider, ConnectionMode } from '@xyflow/react'
+import type { NodeTypes, EdgeTypes } from '@xyflow/react'
+import type { ElementData, ScreenData, PremadeLayout, TextPosition, AspectRatio } from '../../../types/flowchart'
+import { ASPECT_RATIO_SIZES } from '../../../types/flowchart'
+import { useFlowchartStore, selectNodes, selectEdges, edgesForNodes } from '../../../store/useFlowchartStore'
+
+import { usePresentationContext, PresentationContext } from '../PresentationContext'
+import { ScreenNode } from './ScreenNode'
+import { AnimatedEdge } from '../edges/AnimatedEdge'
 import * as LucideIcons from 'lucide-react'
 
 // ── Lightweight inline markdown renderer ─────────────────────────────────────
@@ -683,6 +689,218 @@ function DebugBadge({ id, step }: { id: string; step?: number }) {
   )
 }
 
+// ── Preview node/edge types (populated after ElementNode is defined) ─────────
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let previewNodeTypes: NodeTypes = { screen: ScreenNode as any } as NodeTypes
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const previewEdgeTypes: EdgeTypes = { animatedEdge: AnimatedEdge as any } as EdgeTypes
+
+// ── Expand icon with hover preview ───────────────────────────────────────────
+
+const PREVIEW_BASE = 720
+
+function ExpandPreview({ elementId, expandedScreenId, anchorRef, elementHovered, onPreviewHover }: {
+  elementId: string
+  expandedScreenId: string
+  anchorRef: React.RefObject<HTMLDivElement | null>
+  elementHovered: boolean
+  onPreviewHover: (hovering: boolean) => void
+}) {
+  const [animIn, setAnimIn] = useState(false)
+  const [mounted, setMounted] = useState(false)
+  const [tooltipPos, setTooltipPos] = useState<{ x: number; y: number } | null>(null)
+  const exitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const enterRafRef = useRef<number | null>(null)
+  const allNodes = useFlowchartStore(selectNodes)
+  const allEdges = useFlowchartStore(selectEdges)
+
+  const screen = allNodes.find((n) => n.id === expandedScreenId)
+  const screenData = screen?.data as ScreenData | undefined
+  const screenLevel = screenData?.level ?? 2
+
+  const screenRatio = screenData?.ratio ?? '16:9'
+  const ratioSize = ASPECT_RATIO_SIZES[screenRatio as AspectRatio] ?? ASPECT_RATIO_SIZES['16:9']
+  const previewW = PREVIEW_BASE
+  const previewH = Math.round(PREVIEW_BASE * (ratioSize.h / ratioSize.w))
+
+  // Get only elements spatially inside THIS specific expanded screen, not all screens at this level
+  const screenElements = useMemo(() => {
+    if (!screen) return []
+    const sx = screen.position.x, sy = screen.position.y
+    const sw = screen.width ?? 534, sh = screen.height ?? 300
+    return allNodes.filter((n) => {
+      if (n.type !== 'element') return false
+      const cx = n.position.x + (n.width ?? 120) / 2
+      const cy = n.position.y + (n.height ?? 50) / 2
+      return cx >= sx && cx <= sx + sw && cy >= sy && cy <= sy + sh
+    })
+  }, [allNodes, screen])
+  const screenElementIds = useMemo(() => new Set(screenElements.map((n) => n.id)), [screenElements])
+  const levelEdges = useMemo(() => edgesForNodes(allEdges, screenElementIds), [allEdges, screenElementIds])
+
+  const previewNodes = useMemo(() => screenElements
+    .map((n) => ({
+      ...n,
+      selected: false,
+      draggable: false,
+      zIndex: Math.max(1, (n.zIndex as number | undefined) ?? 1),
+    })), [screenElements])
+
+  const fitViewOpts = useMemo(() => ({ padding: 0.15 }), [])
+
+  // Show overlay when element or preview is hovered
+  const shouldShow = elementHovered
+
+  useEffect(() => {
+    if (shouldShow) {
+      // Mount and calculate position
+      if (exitTimerRef.current) { clearTimeout(exitTimerRef.current); exitTimerRef.current = null }
+      if (anchorRef.current) {
+        const rect = anchorRef.current.getBoundingClientRect()
+        const x = Math.min(rect.right + 12, window.innerWidth - previewW - 16)
+        const y = Math.max(8, Math.min(rect.top - 40, window.innerHeight - previewH - 50))
+        setTooltipPos({ x, y })
+      }
+      setMounted(true)
+      setAnimIn(false)
+      // Trigger enter animation on next frames
+      if (enterRafRef.current) cancelAnimationFrame(enterRafRef.current)
+      enterRafRef.current = requestAnimationFrame(() => {
+        enterRafRef.current = requestAnimationFrame(() => {
+          setAnimIn(true)
+        })
+      })
+    } else {
+      // Start exit animation, then unmount
+      setAnimIn(false)
+      exitTimerRef.current = setTimeout(() => setMounted(false), 450)
+    }
+    return () => {
+      if (enterRafRef.current) cancelAnimationFrame(enterRafRef.current)
+    }
+  }, [shouldShow]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Compute bridge from element to overlay
+  const bridgeStyle = useMemo(() => {
+    if (!tooltipPos || !anchorRef.current) return null
+    const rect = anchorRef.current.getBoundingClientRect()
+    const bridgeLeft = rect.right
+    const bridgeWidth = tooltipPos.x - rect.right + 4
+    if (bridgeWidth <= 0) return null
+    const bridgeTop = Math.min(rect.top, Math.max(8, tooltipPos.y))
+    const bridgeBottom = Math.max(rect.bottom, Math.max(8, tooltipPos.y) + previewH)
+    return {
+      position: 'fixed' as const,
+      left: bridgeLeft,
+      top: bridgeTop,
+      width: bridgeWidth,
+      height: bridgeBottom - bridgeTop,
+      zIndex: 9998,
+    }
+  }, [tooltipPos, anchorRef, previewH])
+
+  if (!mounted || !screen || !tooltipPos) return null
+
+  return createPortal(
+        <>
+        {/* Invisible bridge between element and overlay */}
+        {bridgeStyle && (
+          <div
+            style={bridgeStyle}
+            onMouseEnter={() => onPreviewHover(true)}
+            onMouseLeave={() => onPreviewHover(false)}
+          />
+        )}
+        <div
+          style={{
+            position: 'fixed', left: tooltipPos.x, top: Math.max(8, tooltipPos.y),
+            zIndex: 9999, cursor: 'pointer',
+            opacity: animIn ? 1 : 0,
+            transform: animIn ? 'scale(1) translateY(0)' : 'scale(0.92) translateY(10px)',
+            transition: 'opacity 0.35s cubic-bezier(0.4, 0, 0.2, 1), transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)',
+            transformOrigin: 'top left',
+          }}
+          onMouseEnter={() => onPreviewHover(true)}
+          onMouseLeave={() => onPreviewHover(false)}
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation()
+            onPreviewHover(false)
+            setMounted(false)
+            window.dispatchEvent(new CustomEvent('fc-drill-down', { detail: { elementId } }))
+            useFlowchartStore.getState().drillDown(elementId)
+          }}
+        >
+          <div style={{
+            width: previewW, borderRadius: 10,
+            border: '1px solid #e2e8f0', boxShadow: '0 8px 32px rgba(0,0,0,0.18)',
+            overflow: 'hidden',
+            background: screenData?.backgroundColor ?? '#f8fafc',
+          }}>
+            {/* Header */}
+            <div style={{
+              padding: '8px 14px',
+              fontFamily: 'IBM Plex Mono, monospace', fontSize: 10, fontWeight: 700,
+              color: '#6366f1', textTransform: 'uppercase', letterSpacing: '0.08em',
+              background: 'rgba(255,255,255,0.85)', borderBottom: '1px solid rgba(0,0,0,0.06)',
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            }}>
+              <span>Level {screenLevel}: {screenData?.label}</span>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onPreviewHover(false)
+                  setMounted(false)
+                }}
+                style={{
+                  border: 'none', background: 'transparent', cursor: 'pointer',
+                  color: '#94a3b8', padding: '0 2px', fontSize: 14, lineHeight: 1,
+                  borderRadius: 3, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  transition: 'color 0.15s',
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.color = '#6366f1' }}
+                onMouseLeave={(e) => { e.currentTarget.style.color = '#94a3b8' }}
+                title="Close preview"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* ReactFlow canvas — screen content edge-to-edge */}
+            <div style={{ width: previewW, height: previewH, pointerEvents: 'none' }}>
+              <ReactFlowProvider>
+                <PresentationContext.Provider value={{ presentationMode: false, nodeStates: {}, showSteps: false, showDebug: false }}>
+                  <ReactFlow
+                    nodes={previewNodes}
+                    edges={levelEdges}
+                    nodeTypes={previewNodeTypes}
+                    edgeTypes={previewEdgeTypes}
+                    defaultEdgeOptions={{ type: 'animatedEdge' }}
+                    connectionMode={ConnectionMode.Loose}
+                    nodesDraggable={false}
+                    nodesConnectable={false}
+                    nodesFocusable={false}
+                    elementsSelectable={false}
+                    panOnDrag={false}
+                    zoomOnScroll={false}
+                    zoomOnPinch={false}
+                    zoomOnDoubleClick={false}
+                    preventScrolling={false}
+                    fitView
+                    fitViewOptions={fitViewOpts}
+                    style={{ background: screenData?.backgroundColor ?? '#f8fafc' }}
+                    proOptions={{ hideAttribution: true }}
+                  />
+                </PresentationContext.Provider>
+              </ReactFlowProvider>
+            </div>
+          </div>
+        </div>
+        </>,
+        document.body,
+      )
+}
+
 export const ElementNode = memo(({ id, data, selected, width: nodeW, height: nodeH }: NodeProps) => {
   const { selectNode, updateNodeSize, updateNode } = useFlowchartStore()
   const { presentationMode, nodeStates, showSteps, showDebug } = usePresentationContext()
@@ -694,6 +912,34 @@ export const ElementNode = memo(({ id, data, selected, width: nodeW, height: nod
   const nodeRef      = useRef<HTMLDivElement>(null)
   const textareaRef  = useRef<HTMLTextAreaElement>(null)
   const [isEditing, setIsEditing] = useState(false)
+
+  // Hover state for expand preview (element + preview overlay)
+  const [elHovered, setElHovered] = useState(false)
+  const [previewHovered, setPreviewHovered] = useState(false)
+  const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const hasPreview = !!d.expandedScreenId && !presentationMode
+  const isHovered = elHovered || previewHovered
+
+  const onElementEnter = useCallback(() => {
+    if (!hasPreview) return
+    if (hideTimerRef.current) { clearTimeout(hideTimerRef.current); hideTimerRef.current = null }
+    setElHovered(true)
+  }, [hasPreview])
+
+  const onElementLeave = useCallback(() => {
+    if (!hasPreview) return
+    hideTimerRef.current = setTimeout(() => setElHovered(false), 200)
+  }, [hasPreview])
+
+  const onPreviewHover = useCallback((hovering: boolean) => {
+    if (hovering) {
+      if (hideTimerRef.current) { clearTimeout(hideTimerRef.current); hideTimerRef.current = null }
+    }
+    setPreviewHovered(hovering)
+    if (!hovering) {
+      hideTimerRef.current = setTimeout(() => setElHovered(false), 200)
+    }
+  }, [])
 
   // Image overlay: element has an imageUrl but is not an image/gif elementType
   const isImageOverlay = !!(d.imageUrl && d.elementType !== 'image' && d.elementType !== 'gif' && d.elementType !== 'premade')
@@ -790,6 +1036,8 @@ export const ElementNode = memo(({ id, data, selected, width: nodeW, height: nod
       className="fc-element-node"
       onClick={() => selectNode(id)}
       onDoubleClick={startEditing}
+      onMouseEnter={onElementEnter}
+      onMouseLeave={onElementLeave}
       style={{
         width:        '100%',
         height:       '100%',
@@ -1237,6 +1485,17 @@ export const ElementNode = memo(({ id, data, selected, width: nodeW, height: nod
 
       {/* Handles — always rendered so React Flow can route edges correctly.
           In presentation mode they are invisible and non-interactive. */}
+      {/* Hover preview — shown when element has a deeper-level screen */}
+      {hasPreview && (
+        <ExpandPreview
+          elementId={id}
+          expandedScreenId={d.expandedScreenId!}
+          anchorRef={nodeRef}
+          elementHovered={isHovered}
+          onPreviewHover={onPreviewHover}
+        />
+      )}
+
       {(['Top', 'Bottom', 'Left', 'Right'] as const).map((pos) => (
         <Handle
           key={pos}
@@ -1261,3 +1520,7 @@ export const ElementNode = memo(({ id, data, selected, width: nodeW, height: nod
 })
 
 ElementNode.displayName = 'ElementNode'
+
+// Register ElementNode into preview types now that it's defined
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+previewNodeTypes = { screen: ScreenNode as any, element: ElementNode as any } as NodeTypes

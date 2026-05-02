@@ -99,7 +99,7 @@ export default function FlowchartView() {
       {ready && tab === 'canvas' && (
         <ReactFlowProvider key="canvas">
           <div style={{ position: 'fixed', inset: 0, paddingTop: 45 }}>
-            <FlowCanvas readOnly />
+            <FlowCanvas readOnly readOnlyTopOffset={45} />
           </div>
         </ReactFlowProvider>
       )}

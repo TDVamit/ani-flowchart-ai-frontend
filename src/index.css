@@ -146,6 +146,26 @@ textarea:focus, input:focus, select:focus {
   60%       { transform: scale(1) }
 }
 
+/* ── Level switcher slide animations ─────────────────────────────────────── */
+/* Going deeper: whole indicator slides up from below */
+.ls-anim-up {
+  animation: ls-up 0.8s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+/* Going back: whole indicator slides down from above */
+.ls-anim-down {
+  animation: ls-down 0.8s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@keyframes ls-up {
+  0%   { transform: translateY(24px); opacity: 0.2 }
+  40%  { opacity: 1 }
+  100% { transform: translateY(0);    opacity: 1 }
+}
+@keyframes ls-down {
+  0%   { transform: translateY(-24px); opacity: 0.2 }
+  40%  { opacity: 1 }
+  100% { transform: translateY(0);     opacity: 1 }
+}
+
 /* ── React Flow overrides (light theme for flowchart) ─────────────────────── */
 
 .react-flow__controls button {
@@ -189,6 +209,9 @@ textarea:focus, input:focus, select:focus {
 /* Hidden by default, visible on hover */
 .react-flow__handle.fc-handle { opacity: 0; }
 .react-flow__handle.fc-handle:hover { opacity: 1 !important; cursor: crosshair; }
+
+/* Ensure nodes receive hover events even in read-only/canvas views */
+.react-flow__node-element { pointer-events: all !important; }
 
 /* ── Animation preview trigger ────────────────────────────────────────────── */
 

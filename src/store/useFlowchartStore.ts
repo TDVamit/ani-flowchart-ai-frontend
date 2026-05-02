@@ -7,6 +7,13 @@ import {
   defaultEdgeStyle, defaultEdgeAnimation,
   ASPECT_RATIO_SIZES,
 } from '../types/flowchart'
+
+export interface LevelPathEntry {
+  level: number
+  screenId: string
+  label: string
+  sourceElementId?: string   // element that was expanded to reach this level
+}
 import { flowchartsApi } from '../api/client'
 import type { AIChartSpec } from '../api/client'
 
@@ -38,6 +45,10 @@ interface FlowchartStore {
   selectedNodeId: string | null
   selectedEdgeId: string | null
   loading:       boolean
+
+  // Level navigation
+  currentLevel:  number
+  levelPath:     LevelPathEntry[]
 
   // Chart management
   loadCharts():                    Promise<void>
@@ -76,6 +87,14 @@ interface FlowchartStore {
   // AI import
   importAIChart: (spec: AIChartSpec) => void
 
+  // Level navigation
+  expandElement:    (elementId: string) => string   // returns new screen ID
+  drillDown:        (elementId: string) => void
+  drillUp:          () => void
+  navigateToLevel:  (index: number) => void         // jump to breadcrumb index
+  jumpToLevel:      (level: number) => void          // jump directly to a level number
+  unlinkExpansion:  (elementId: string) => void      // remove expansion link
+
   // Undo / redo
   history:     Array<{ nodes: FlowNode[]; edges: FlowEdge[] }>
   future:      Array<{ nodes: FlowNode[]; edges: FlowEdge[] }>
@@ -106,6 +125,8 @@ export const useFlowchartStore = create<FlowchartStore>()((set, get) => ({
   selectedNodeId: null,
   selectedEdgeId: null,
   loading:        false,
+  currentLevel:   1,
+  levelPath:      [],
   history:        [],
   future:         [],
 
@@ -152,24 +173,43 @@ export const useFlowchartStore = create<FlowchartStore>()((set, get) => ({
   },
 
   setActiveChart: async (id) => {
-    set({ activeChartId: id, selectedNodeId: null, selectedEdgeId: null })
-    // Load chart data from API if not already in memory
-    const existing = get().charts[id]
-    if (!existing) {
-      try {
-        const res = await flowchartsApi.get(id)
-        set((s) => ({
-          charts: { ...s.charts, [id]: { nodes: res.data.nodes ?? [], edges: res.data.edges ?? [] } },
-        }))
-      } catch {
-        set((s) => ({ charts: { ...s.charts, [id]: { nodes: [], edges: [] } } }))
+    // Save the current chart before switching away to avoid data loss
+    const prev = get().activeChartId
+    if (prev && prev !== id) {
+      const prevChart = get().charts[prev]
+      if (prevChart) {
+        try {
+          await flowchartsApi.update(prev, { nodes: prevChart.nodes as unknown[], edges: prevChart.edges as unknown[] })
+        } catch { /* best-effort save */ }
+      }
+    }
+    // Mark loading to prevent auto-save race conditions
+    set({ activeChartId: id, selectedNodeId: null, selectedEdgeId: null, currentLevel: 1, levelPath: [], loading: true })
+    // Always reload from API to get the freshest data (don't trust cache)
+    try {
+      const res = await flowchartsApi.get(id)
+      set((s) => ({
+        charts: { ...s.charts, [id]: { nodes: res.data.nodes ?? [], edges: res.data.edges ?? [] } },
+        loading: false,
+      }))
+    } catch {
+      // Fall back to cache if available, otherwise empty
+      const existing = get().charts[id]
+      if (!existing) {
+        set((s) => ({ charts: { ...s.charts, [id]: { nodes: [], edges: [] } }, loading: false }))
+      } else {
+        set({ loading: false })
       }
     }
   },
 
   saveChart: async (id) => {
+    // Guard: don't save while a chart is loading (race condition protection)
+    if (get().loading) return
     const chart = get().charts[id]
     if (!chart) return
+    // Guard: only save if this is still the active chart
+    if (get().activeChartId !== id) return
     await flowchartsApi.update(id, { nodes: chart.nodes as unknown[], edges: chart.edges as unknown[] })
     set((s) => ({
       metas: s.metas.map((m) =>
@@ -297,8 +337,9 @@ export const useFlowchartStore = create<FlowchartStore>()((set, get) => ({
   // ── Screen ────────────────────────────────────────────────────────────────
 
   addScreen: (position) => {
-    const { activeChartId } = get()
+    const { activeChartId, currentLevel } = get()
     if (!activeChartId) return ''
+    if (currentLevel > 1) return ''   // screens can only be added at level 1
     get().pushHistory()
     const id    = uid('screen')
     const chart = get().charts[activeChartId] ?? { nodes: [], edges: [] }
@@ -379,7 +420,7 @@ export const useFlowchartStore = create<FlowchartStore>()((set, get) => ({
   // ── Element ───────────────────────────────────────────────────────────────
 
   addElement: (opts, position) => {
-    const { activeChartId, selectedNodeId } = get()
+    const { activeChartId, selectedNodeId, currentLevel } = get()
     if (!activeChartId) return ''
     get().pushHistory()
     const id    = uid('element')
@@ -399,8 +440,10 @@ export const useFlowchartStore = create<FlowchartStore>()((set, get) => ({
     if (position) {
       pos = position
     } else {
-      // Place at center of selected screen, or last screen
-      const screens = chart.nodes.filter((n: FlowNode) => n.type === 'screen')
+      // Place at center of selected screen, or last screen — filtered to current level
+      const screens = chart.nodes.filter(
+        (n: FlowNode) => n.type === 'screen' && ((n.data as ScreenData).level ?? 1) === currentLevel,
+      )
       const selectedScreen = selectedNodeId ? screens.find((n: FlowNode) => n.id === selectedNodeId) : null
       const targetScreen   = selectedScreen ?? screens[screens.length - 1] ?? null
       if (targetScreen) {
@@ -518,13 +561,53 @@ export const useFlowchartStore = create<FlowchartStore>()((set, get) => ({
     set((s) => {
       const chart = s.charts[activeChartId]
       if (!chart) return s
+
+      // Collect all IDs to remove (cascade through expanded screens)
+      const removeIds = new Set<string>([id])
+      const node = chart.nodes.find((n) => n.id === id)
+
+      // If removing an element with expandedScreenId, cascade-delete that screen + its children
+      if (node?.type === 'element' && (node.data as ElementData).expandedScreenId) {
+        const collectChildren = (screenId: string) => {
+          removeIds.add(screenId)
+          // Find all elements spatially inside this screen
+          const screen = chart.nodes.find((n) => n.id === screenId)
+          if (!screen) return
+          const sx = screen.position.x, sy = screen.position.y
+          const sw = screen.width ?? 534, sh = screen.height ?? 300
+          for (const n of chart.nodes) {
+            if (n.type !== 'element' || removeIds.has(n.id)) continue
+            const cx = n.position.x + (n.width ?? 120) / 2
+            const cy = n.position.y + (n.height ?? 50) / 2
+            if (cx >= sx && cx <= sx + sw && cy >= sy && cy <= sy + sh) {
+              removeIds.add(n.id)
+              // Recursively remove this element's expansion too
+              const expId = (n.data as ElementData).expandedScreenId
+              if (expId) collectChildren(expId)
+            }
+          }
+        }
+        collectChildren((node.data as ElementData).expandedScreenId!)
+      }
+
+      // If removing a screen, clear the parent element's expandedScreenId
+      let updatedNodes = chart.nodes
+      if (node?.type === 'screen' && (node.data as ScreenData).parentElementId) {
+        const parentElId = (node.data as ScreenData).parentElementId
+        updatedNodes = updatedNodes.map((n) =>
+          n.id === parentElId
+            ? { ...n, data: { ...n.data, expandedScreenId: undefined } }
+            : n,
+        )
+      }
+
       return {
         charts: {
           ...s.charts,
           [activeChartId]: {
             ...chart,
-            nodes: chart.nodes.filter((n) => n.id !== id),
-            edges: chart.edges.filter((e) => e.source !== id && e.target !== id),
+            nodes: updatedNodes.filter((n) => !removeIds.has(n.id)),
+            edges: chart.edges.filter((e) => !removeIds.has(e.source) && !removeIds.has(e.target)),
           },
         },
       }
@@ -741,6 +824,219 @@ export const useFlowchartStore = create<FlowchartStore>()((set, get) => ({
     }))
   },
 
+  // ── Level navigation ────────────────────────────────────────────────────────
+
+  expandElement: (elementId) => {
+    const { activeChartId, currentLevel } = get()
+    if (!activeChartId) return ''
+    get().pushHistory()
+
+    const chart = get().charts[activeChartId]
+    if (!chart) return ''
+    const elNode = chart.nodes.find((n) => n.id === elementId && n.type === 'element')
+    if (!elNode) return ''
+    const elData = elNode.data as ElementData
+
+    // If already expanded, just navigate there
+    if (elData.expandedScreenId) {
+      get().drillDown(elementId)
+      return elData.expandedScreenId
+    }
+
+    // Find which screen this element is in to determine its level
+    const elementLevel = currentLevel
+
+    // Create new screen at next level
+    const screenId = uid('screen')
+    const ratio: AspectRatio = '16:9'
+    const dim = ASPECT_RATIO_SIZES[ratio]
+
+    // Position deeper-level screens far from level 1 to avoid spatial overlap.
+    // Each level gets its own Y band: level 2 at y=10000, level 3 at y=20000, etc.
+    const targetLevel = elementLevel + 1
+    const levelYOffset = (targetLevel - 1) * 10000
+    const levelScreens = chart.nodes.filter(
+      (n) => n.type === 'screen' && ((n.data as ScreenData).level ?? 1) === targetLevel,
+    )
+    const gap = 80
+    let posX = 100
+    if (levelScreens.length > 0) {
+      const maxRight = Math.max(...levelScreens.map((n) => n.position.x + (n.width ?? dim.w)))
+      posX = maxRight + gap
+    }
+
+    const screenNode: ScreenNode = {
+      id: screenId,
+      type: 'screen',
+      position: { x: posX, y: levelYOffset + 100 },
+      width: dim.w,
+      height: dim.h,
+      style: { width: dim.w, height: dim.h },
+      data: {
+        label: elData.text || 'Expanded',
+        ratio,
+        backgroundColor: '#f8fafc',
+        borderColor: '#6366f1',
+        order: 0,
+        level: elementLevel + 1,
+        parentElementId: elementId,
+      },
+    }
+
+    // Update the element with expandedScreenId and add the new screen
+    set((s) => ({
+      charts: {
+        ...s.charts,
+        [activeChartId]: {
+          ...chart,
+          nodes: [
+            ...chart.nodes.map((n) =>
+              n.id === elementId
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                ? { ...n, data: { ...n.data, expandedScreenId: screenId } as any }
+                : n,
+            ),
+            screenNode,
+          ],
+        },
+      },
+      currentLevel: elementLevel + 1,
+      levelPath: [
+        ...get().levelPath,
+        { level: elementLevel + 1, screenId, label: screenNode.data.label, sourceElementId: elementId },
+      ],
+      selectedNodeId: null,
+      selectedEdgeId: null,
+    }))
+
+    return screenId
+  },
+
+  drillDown: (elementId) => {
+    const { activeChartId } = get()
+    if (!activeChartId) return
+    const chart = get().charts[activeChartId]
+    if (!chart) return
+
+    const elNode = chart.nodes.find((n) => n.id === elementId && n.type === 'element')
+    if (!elNode) return
+    const expandedScreenId = (elNode.data as ElementData).expandedScreenId
+    if (!expandedScreenId) return
+
+    const screenNode = chart.nodes.find((n) => n.id === expandedScreenId)
+    if (!screenNode) return
+    const screenData = screenNode.data as ScreenData
+    const targetLevel = screenData.level ?? 1
+
+    set({
+      currentLevel: targetLevel,
+      levelPath: [
+        ...get().levelPath,
+        { level: targetLevel, screenId: expandedScreenId, label: screenData.label, sourceElementId: elementId },
+      ],
+      selectedNodeId: null,
+      selectedEdgeId: null,
+    })
+  },
+
+  drillUp: () => {
+    const { levelPath } = get()
+    if (levelPath.length === 0) return
+    const newPath = levelPath.slice(0, -1)
+    set({
+      currentLevel: newPath.length > 0 ? newPath[newPath.length - 1].level : 1,
+      levelPath: newPath,
+      selectedNodeId: null,
+      selectedEdgeId: null,
+    })
+  },
+
+  navigateToLevel: (index) => {
+    const { levelPath } = get()
+    if (index < 0) {
+      // Navigate to level 1
+      set({ currentLevel: 1, levelPath: [], selectedNodeId: null, selectedEdgeId: null })
+      return
+    }
+    if (index >= levelPath.length) return
+    const newPath = levelPath.slice(0, index + 1)
+    set({
+      currentLevel: newPath[newPath.length - 1].level,
+      levelPath: newPath,
+      selectedNodeId: null,
+      selectedEdgeId: null,
+    })
+  },
+
+  jumpToLevel: (level) => {
+    if (level === 1) {
+      set({ currentLevel: 1, levelPath: [], selectedNodeId: null, selectedEdgeId: null })
+      return
+    }
+    const { levelPath } = get()
+    // If the level exists in our path, truncate to it
+    const idx = levelPath.findIndex(e => e.level === level)
+    if (idx >= 0) {
+      const newPath = levelPath.slice(0, idx + 1)
+      set({ currentLevel: level, levelPath: newPath, selectedNodeId: null, selectedEdgeId: null })
+    } else {
+      // Level exists in the chart but not in the path — just set it directly
+      set({ currentLevel: level, selectedNodeId: null, selectedEdgeId: null })
+    }
+  },
+
+  unlinkExpansion: (elementId) => {
+    const { activeChartId } = get()
+    if (!activeChartId) return
+    get().pushHistory()
+    const chart = get().charts[activeChartId]
+    if (!chart) return
+
+    const elNode = chart.nodes.find((n) => n.id === elementId)
+    if (!elNode) return
+    const expandedScreenId = (elNode.data as ElementData).expandedScreenId
+    if (!expandedScreenId) return
+
+    // Collect all nodes/edges belonging to the expanded screen and its children
+    const removeIds = new Set<string>()
+    const collectChildren = (screenId: string) => {
+      removeIds.add(screenId)
+      const screen = chart.nodes.find((n) => n.id === screenId)
+      if (!screen) return
+      const sx = screen.position.x, sy = screen.position.y
+      const sw = screen.width ?? 534, sh = screen.height ?? 300
+      for (const n of chart.nodes) {
+        if (n.type !== 'element' || removeIds.has(n.id)) continue
+        const cx = n.position.x + (n.width ?? 120) / 2
+        const cy = n.position.y + (n.height ?? 50) / 2
+        if (cx >= sx && cx <= sx + sw && cy >= sy && cy <= sy + sh) {
+          removeIds.add(n.id)
+          const expId = (n.data as ElementData).expandedScreenId
+          if (expId) collectChildren(expId)
+        }
+      }
+    }
+    collectChildren(expandedScreenId)
+
+    set((s) => ({
+      charts: {
+        ...s.charts,
+        [activeChartId]: {
+          ...chart,
+          nodes: chart.nodes
+            .map((n) =>
+              n.id === elementId
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                ? { ...n, data: { ...n.data, expandedScreenId: undefined } as any }
+                : n,
+            )
+            .filter((n) => !removeIds.has(n.id)),
+          edges: chart.edges.filter((e) => !removeIds.has(e.source) && !removeIds.has(e.target)),
+        },
+      },
+    }))
+  },
+
   // ── AI import ──────────────────────────────────────────────────────────────
 
   importAIChart: (spec) => {
@@ -885,4 +1181,45 @@ export const selectNodes = (s: FlowchartStore): FlowNode[] =>
 
 export const selectEdges = (s: FlowchartStore): FlowEdge[] =>
   s.activeChartId ? (s.charts[s.activeChartId]?.edges ?? []) : []
+
+// ── Level-aware selectors ────────────────────────────────────────────────────
+
+export const selectCurrentLevel = (s: { currentLevel: number }) => s.currentLevel
+export const selectLevelPath    = (s: { levelPath: LevelPathEntry[] }) => s.levelPath
+
+/** Returns only the screens at the given level + elements spatially inside those screens */
+export function nodesForLevel(allNodes: FlowNode[], level: number): FlowNode[] {
+  // Screens belong to a level by their explicit `level` field (default 1 if omitted)
+  const levelScreens = allNodes.filter(
+    (n) => n.type === 'screen' && ((n.data as ScreenData).level ?? 1) === level,
+  )
+
+  const result: FlowNode[] = [...levelScreens]
+
+  for (const n of allNodes) {
+    if (n.type !== 'element') continue
+    const cx = n.position.x + (n.width ?? 120) / 2
+    const cy = n.position.y + (n.height ?? 50) / 2
+
+    // Check if element is inside one of the level's screens
+    let inLevelScreen = false
+    for (const scr of levelScreens) {
+      const sx = scr.position.x, sy = scr.position.y
+      const sw = scr.width ?? 534, sh = scr.height ?? 300
+      if (cx >= sx && cx <= sx + sw && cy >= sy && cy <= sy + sh) {
+        inLevelScreen = true
+        break
+      }
+    }
+    if (inLevelScreen) {
+      result.push(n)
+    }
+  }
+  return result
+}
+
+/** Returns edges whose source and target are both in the given node set */
+export function edgesForNodes(allEdges: FlowEdge[], nodeIds: Set<string>): FlowEdge[] {
+  return allEdges.filter((e) => nodeIds.has(e.source) && nodeIds.has(e.target))
+}
 

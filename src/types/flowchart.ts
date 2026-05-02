@@ -83,6 +83,8 @@ export interface ScreenData {
   backgroundColor: string
   borderColor: string
   order: number       // playback order
+  level?: number            // 1 = top level (default), 2, 3, … for deeper levels
+  parentElementId?: string  // element that was expanded to create this screen
 }
 
 export interface ElementStyle {
@@ -137,6 +139,7 @@ export interface ElementData {
   style: ElementStyle
   animation: ElementAnimation
   step: number  // 1-based appearance order
+  expandedScreenId?: string  // links to a screen at a deeper level
 }
 
 // ── Edge data ─────────────────────────────────────────────────────────────────
@@ -190,9 +193,9 @@ export const defaultElementStyle = (): ElementStyle => ({
   backgroundColor: '#ffffff',
   backgroundOpacity: 100,
   borderColor: '#6366f1',
-  borderWidth: 1.5,
+  borderWidth: 0,
   borderRadius: 4,
-  textColor: '#1e293b',
+  textColor: '#7477fb',
   fontSize: 13,
   fontWeight: 'normal',
   fontStyle: 'normal',
@@ -200,9 +203,9 @@ export const defaultElementStyle = (): ElementStyle => ({
   textVerticalAlign: 'middle',
   fontFamily: 'IBM Plex Sans',
   opacity: 1,
-  shadowEnabled: false,
+  shadowEnabled: true,
   shadowColor: '#000000',
-  shadowOpacity: 20,
+  shadowOpacity: 35,
   shadowBlur: 8,
   shadowX: 0,
   shadowY: 2,

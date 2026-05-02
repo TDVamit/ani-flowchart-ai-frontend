@@ -234,7 +234,7 @@ const IN_ANIM_OPTIONS: { value: InAnimationType; label: string }[] = [
 
 function ElementConfig({ id }: { id: string }) {
   const nodes = useFlowchartStore(selectNodes)
-  const { updateNode, updateNodeSize, removeNode, reorderNode } = useFlowchartStore()
+  const { updateNode, updateNodeSize, removeNode, reorderNode, expandElement, drillDown, unlinkExpansion, currentLevel } = useFlowchartStore()
   const { setNodes } = useReactFlow()
   const [showIconPicker, setShowIconPicker] = useState(false)
   const node = nodes.find((n) => n.id === id)
@@ -577,6 +577,48 @@ function ElementConfig({ id }: { id: string }) {
       <Row label="Duration (s)"><NumberInput value={data.animation.duration} onChange={(v) => updAnim({ duration: v })} min={0.1} step={0.1} /></Row>
       <Row label="Delay (s)"><NumberInput value={data.animation.delay} onChange={(v) => updAnim({ delay: v })} min={0} step={0.1} /></Row>
       <Row label="Stay (s)"><NumberInput value={data.animation.stay ?? 0} onChange={(v) => updAnim({ stay: Math.max(0, v) })} min={0} step={0.5} /></Row>
+
+      <Section title="Levels" />
+      {data.expandedScreenId ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '0 12px' }}>
+          <span style={{ fontSize: 9, color: '#22c55e', fontFamily: 'IBM Plex Mono, monospace' }}>
+            Expanded to deeper level
+          </span>
+          <button
+            onClick={() => drillDown(id)}
+            style={{
+              padding: '6px 0', background: '#6366f1', border: 'none', borderRadius: 4,
+              color: '#fff', cursor: 'pointer', fontFamily: 'IBM Plex Mono, monospace',
+              fontSize: 10, fontWeight: 600,
+            }}
+          >
+            Go to Expanded Screen
+          </button>
+          <button
+            onClick={() => unlinkExpansion(id)}
+            style={{
+              padding: '5px 0', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 4,
+              color: '#ef4444', cursor: 'pointer', fontFamily: 'IBM Plex Mono, monospace',
+              fontSize: 10, fontWeight: 500,
+            }}
+          >
+            Remove Expansion
+          </button>
+        </div>
+      ) : (
+        <div style={{ padding: '0 12px' }}>
+          <button
+            onClick={() => expandElement(id)}
+            style={{
+              width: '100%', padding: '6px 0', background: '#eef2ff', border: '1px solid #c7d2fe',
+              borderRadius: 4, color: '#6366f1', cursor: 'pointer',
+              fontFamily: 'IBM Plex Mono, monospace', fontSize: 10, fontWeight: 600,
+            }}
+          >
+            Expand to Level {currentLevel + 1}
+          </button>
+        </div>
+      )}
 
       <DeleteBtn onClick={() => removeNode(id)} />
     </div>
