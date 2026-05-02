@@ -29,6 +29,7 @@ import { StepViewer }      from './animation/StepViewer'
 import { AIGenerateModal } from './AIGenerateModal'
 import { PresentationContext } from './PresentationContext'
 import type { NodeAnimState } from './PresentationContext'
+import CompareView from './CompareView'
 
 const nodeTypes: NodeTypes = {
   screen:  ScreenNode  as any, // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -234,9 +235,16 @@ function LevelSwitcher({ allNodes, currentLevel, jumpToLevel }: {
 
 // ── Canvas View Overlay (read-only canvas, same as public link) ───────────────
 
-function CanvasViewOverlay({ onClose }: { onClose: () => void }) {
+function CanvasViewOverlay({ onClose, compareData }: {
+  onClose: () => void
+  compareData?: {
+    originalNodes: FlowNode[]; originalEdges: FlowEdge[]; originalName: string
+    parallelNodes: FlowNode[]; parallelEdges: FlowEdge[]; parallelName: string
+  } | null
+}) {
   const allNodes = useFlowchartStore(selectNodes)
   const allEdges = useFlowchartStore(selectEdges)
+  const [showCompareInCanvas, setShowCompareInCanvas] = useState(false)
   const [viewLevel, setViewLevel] = useState(1)
   const [viewPath, setViewPath] = useState<Array<{ level: number; label: string; screenId?: string; sourceElementId?: string }>>([])
   const [fitKey, setFitKey] = useState(0)
@@ -356,82 +364,114 @@ function CanvasViewOverlay({ onClose }: { onClose: () => void }) {
           )}
           <div style={{ width: 8, height: 8, borderRadius: 2, background: '#6366f1' }} />
           <span style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: 12, fontWeight: 700, color: '#1e293b', letterSpacing: '0.08em' }}>
-            CANVAS VIEW
+            {showCompareInCanvas ? 'COMPARE VIEW' : 'CANVAS VIEW'}
           </span>
         </div>
-        <button
-          onClick={onClose}
-          style={{
-            padding: '6px 14px', background: '#fff', border: '1px solid #e2e8f0', borderRadius: 5,
-            color: '#475569', cursor: 'pointer', fontFamily: 'IBM Plex Mono, monospace', fontSize: 12, fontWeight: 500,
-          }}
-        >
-          Close
-        </button>
-      </div>
-
-      {/* Canvas */}
-      <div style={{ position: 'absolute', inset: 0, paddingTop: 45 }}>
-        {/* Floating back button on canvas */}
-        {viewLevel > 1 && (
+        <div style={{ display: 'flex', gap: 6 }}>
+          {compareData && (
+            <button
+              onClick={() => setShowCompareInCanvas(!showCompareInCanvas)}
+              style={{
+                padding: '6px 14px',
+                background: showCompareInCanvas ? '#6366f1' : '#fff',
+                border: `1px solid ${showCompareInCanvas ? '#6366f1' : '#e2e8f0'}`,
+                borderRadius: 5,
+                color: showCompareInCanvas ? '#fff' : '#6366f1',
+                cursor: 'pointer', fontFamily: 'IBM Plex Mono, monospace', fontSize: 12, fontWeight: 600,
+              }}
+            >
+              {showCompareInCanvas ? 'Single' : 'Compare'}
+            </button>
+          )}
           <button
-            onClick={handleBack}
+            onClick={onClose}
             style={{
-              position: 'absolute', top: 57, left: 12, zIndex: 30,
-              padding: '5px 12px', background: 'rgba(255,255,255,0.95)', border: '1px solid #c7d2fe',
-              borderRadius: 5, cursor: 'pointer', fontFamily: 'IBM Plex Mono, monospace',
-              fontSize: 11, color: '#6366f1', fontWeight: 600,
-              backdropFilter: 'blur(6px)', boxShadow: '0 1px 4px rgba(0,0,0,0.08)',
+              padding: '6px 14px', background: '#fff', border: '1px solid #e2e8f0', borderRadius: 5,
+              color: '#475569', cursor: 'pointer', fontFamily: 'IBM Plex Mono, monospace', fontSize: 12, fontWeight: 500,
             }}
           >
-            &larr; Back
+            Close
           </button>
-        )}
-        {/* Level switcher */}
-        <div style={{ position: 'absolute', top: 57, right: 0, zIndex: 30 }}>
-          <LevelSwitcher allNodes={allNodes} currentLevel={viewLevel} jumpToLevel={(lvl) => {
-            if (lvl < viewLevel) {
-              // Going back — trim path
-              const idx = viewPath.findIndex(e => e.level === lvl)
-              if (idx >= 0) { setViewLevel(lvl); setViewPath(viewPath.slice(0, idx + 1)) }
-              else { setViewLevel(lvl); setViewPath([]) }
-            } else {
-              setViewLevel(lvl)
-            }
-            setFitTargetId(null)
-            setFitKey(k => k + 1)
-          }} />
         </div>
-        <ReactFlowProvider key={fitKey}>
-          <PresentationContext.Provider value={{ presentationMode: false, nodeStates: {}, showSteps: false, showDebug: false }}>
-            <ReactFlow
-              nodes={roNodes}
-              edges={levelEdges}
-              nodeTypes={nodeTypes}
-              edgeTypes={edgeTypes}
-              defaultEdgeOptions={{ type: 'animatedEdge' }}
-              nodesDraggable={false}
-              nodesConnectable={false}
-              nodesFocusable={false}
-              elementsSelectable={false}
-              connectionMode={ConnectionMode.Loose}
-              panOnDrag
-              panOnScroll
-              zoomOnScroll={false}
-              zoomOnPinch={false}
-              zoomOnDoubleClick={false}
-              fitView
-              fitViewOptions={fitViewOpts}
-              style={{ background: '#f8fafc' }}
-              proOptions={{ hideAttribution: true }}
-            >
-              <Background variant={BackgroundVariant.Dots} gap={16} size={1} color="#e2e8f0" />
-              <Controls showInteractive={false} />
-              <MiniMap pannable zoomable style={{ border: '1px solid #e2e8f0' }} />
-            </ReactFlow>
-          </PresentationContext.Provider>
-        </ReactFlowProvider>
       </div>
+
+      {/* Compare or single canvas */}
+      {showCompareInCanvas && compareData ? (
+        <div style={{ position: 'absolute', inset: 0, paddingTop: 45 }}>
+          <CompareView
+            onClose={() => setShowCompareInCanvas(false)}
+            originalNodes={compareData.originalNodes}
+            originalEdges={compareData.originalEdges}
+            originalName={compareData.originalName}
+            parallelNodes={compareData.parallelNodes}
+            parallelEdges={compareData.parallelEdges}
+            parallelName={compareData.parallelName}
+            embedded
+            topOffset={0}
+          />
+        </div>
+      ) : (
+        <div style={{ position: 'absolute', inset: 0, paddingTop: 45 }}>
+          {/* Floating back button on canvas */}
+          {viewLevel > 1 && (
+            <button
+              onClick={handleBack}
+              style={{
+                position: 'absolute', top: 57, left: 12, zIndex: 30,
+                padding: '5px 12px', background: 'rgba(255,255,255,0.95)', border: '1px solid #c7d2fe',
+                borderRadius: 5, cursor: 'pointer', fontFamily: 'IBM Plex Mono, monospace',
+                fontSize: 11, color: '#6366f1', fontWeight: 600,
+                backdropFilter: 'blur(6px)', boxShadow: '0 1px 4px rgba(0,0,0,0.08)',
+              }}
+            >
+              &larr; Back
+            </button>
+          )}
+          {/* Level switcher */}
+          <div style={{ position: 'absolute', top: 57, right: 0, zIndex: 30 }}>
+            <LevelSwitcher allNodes={allNodes} currentLevel={viewLevel} jumpToLevel={(lvl) => {
+              if (lvl < viewLevel) {
+                const idx = viewPath.findIndex(e => e.level === lvl)
+                if (idx >= 0) { setViewLevel(lvl); setViewPath(viewPath.slice(0, idx + 1)) }
+                else { setViewLevel(lvl); setViewPath([]) }
+              } else {
+                setViewLevel(lvl)
+              }
+              setFitTargetId(null)
+              setFitKey(k => k + 1)
+            }} />
+          </div>
+          <ReactFlowProvider key={fitKey}>
+            <PresentationContext.Provider value={{ presentationMode: false, nodeStates: {}, showSteps: false, showDebug: false }}>
+              <ReactFlow
+                nodes={roNodes}
+                edges={levelEdges}
+                nodeTypes={nodeTypes}
+                edgeTypes={edgeTypes}
+                defaultEdgeOptions={{ type: 'animatedEdge' }}
+                nodesDraggable={false}
+                nodesConnectable={false}
+                nodesFocusable={false}
+                elementsSelectable={false}
+                connectionMode={ConnectionMode.Loose}
+                panOnDrag
+                panOnScroll
+                zoomOnScroll={false}
+                zoomOnPinch={false}
+                zoomOnDoubleClick={false}
+                fitView
+                fitViewOptions={fitViewOpts}
+                style={{ background: '#f8fafc' }}
+                proOptions={{ hideAttribution: true }}
+              >
+                <Background variant={BackgroundVariant.Dots} gap={16} size={1} color="#e2e8f0" />
+                <Controls showInteractive={false} />
+                <MiniMap pannable zoomable style={{ border: '1px solid #e2e8f0' }} />
+              </ReactFlow>
+            </PresentationContext.Provider>
+          </ReactFlowProvider>
+        </div>
+      )}
     </div>
   )
 }
@@ -612,7 +652,7 @@ export default function FlowCanvas({ presentationMode = false, readOnly = false,
   const allEdges = useFlowchartStore(selectEdges)
   const currentLevel = useFlowchartStore(selectCurrentLevel)
   const levelPath    = useFlowchartStore(selectLevelPath)
-  const { onNodesChange, onEdgesChange, onConnect, selectNode, selectEdge, saveChart, activeChartId, pasteElements, updateNode, pushHistory, undo, redo, drillUp, navigateToLevel, jumpToLevel } = useFlowchartStore()
+  const { onNodesChange, onEdgesChange, onConnect, selectNode, selectEdge, saveChart, activeChartId, pasteElements, updateNode, pushHistory, undo, redo, drillUp, navigateToLevel, jumpToLevel, metas, makeParallel, deleteParallel, parallelData, syncScreen, syncAll, charts } = useFlowchartStore()
 
   // Rendered level lags behind currentLevel to allow exit animation on old content
   const [renderLevel, setRenderLevel] = useState(currentLevel)
@@ -643,6 +683,8 @@ export default function FlowCanvas({ presentationMode = false, readOnly = false,
   const [ctrlDown,   setCtrlDown]     = useState(false)
   const [shareId,    setShareId]      = useState<string | null>(null)
   const [shareLoading, setShareLoading] = useState(false)
+  const [showCompare, setShowCompare] = useState(false)
+  const [parallelLoading, setParallelLoading] = useState(false)
 
   // Canvas zoom animation on level change
   const [canvasScale, setCanvasScale] = useState(1)
@@ -764,6 +806,36 @@ export default function FlowCanvas({ presentationMode = false, readOnly = false,
       }).catch(() => {})
     })
   }, [activeChartId, readOnly, presentationMode])
+
+  // Parallel data for this chart (lives in same document)
+  const currentMeta = metas.find((m) => m.id === activeChartId)
+  const hasParallel = !!(activeChartId && parallelData[activeChartId])
+  const currentParallel = activeChartId ? parallelData[activeChartId] : null
+
+  // Handle creating a parallel
+  const handleCreateParallel = async () => {
+    if (!activeChartId) return
+    setParallelLoading(true)
+    try {
+      await makeParallel(activeChartId)
+      const { default: toast } = await import('react-hot-toast')
+      toast.success('Parallel version created!')
+      setShowCompare(true)
+    } catch { /* handled by interceptor */ }
+    setParallelLoading(false)
+  }
+
+  // Delete parallel
+  const handleDeleteParallel = async () => {
+    if (!activeChartId) return
+    if (!window.confirm('Delete the parallel version? This cannot be undone.')) return
+    try {
+      await deleteParallel(activeChartId)
+      setShowCompare(false)
+      const { default: toast } = await import('react-hot-toast')
+      toast.success('Parallel deleted')
+    } catch { /* handled by interceptor */ }
+  }
 
   const handleToggleShare = async () => {
     if (!activeChartId) return
@@ -1233,6 +1305,14 @@ export default function FlowCanvas({ presentationMode = false, readOnly = false,
           ) : (
             <TopBtn onClick={handleToggleShare}>{shareLoading ? '…' : 'Share'}</TopBtn>
           )}
+          {/* Parallel / Compare */}
+          {hasParallel ? (
+            <TopBtn onClick={() => setShowCompare(true)}>Compare</TopBtn>
+          ) : (
+            <TopBtn onClick={handleCreateParallel}>
+              {parallelLoading ? 'Creating...' : 'Make Parallel'}
+            </TopBtn>
+          )}
           <TopBtn onClick={() => setShowSteps(true)}>Steps</TopBtn>
           <TopBtn onClick={() => setShowCanvasView(true)}>Canvas</TopBtn>
           <TopBtn onClick={() => setShowPlayer(true)} primary>Preview</TopBtn>
@@ -1426,9 +1506,40 @@ export default function FlowCanvas({ presentationMode = false, readOnly = false,
       `}</style>
 
       {showPlayer   && <AnimationPlayer onClose={() => setShowPlayer(false)} />}
-      {showCanvasView && <CanvasViewOverlay onClose={() => setShowCanvasView(false)} />}
+      {showCanvasView && <CanvasViewOverlay
+        onClose={() => setShowCanvasView(false)}
+        compareData={activeChartId && currentParallel && charts[activeChartId] ? {
+          originalNodes: charts[activeChartId].nodes,
+          originalEdges: charts[activeChartId].edges,
+          originalName: currentMeta?.name ?? 'Original',
+          parallelNodes: currentParallel.nodes,
+          parallelEdges: currentParallel.edges,
+          parallelName: 'Parallel',
+        } : undefined}
+      />}
       {showSteps    && <StepViewer     onClose={() => setShowSteps(false)}  />}
       {showAIModal  && <AIGenerateModal onClose={() => setShowAIModal(false)} />}
+
+      {/* Compare overlay */}
+      {showCompare && activeChartId && currentParallel && (() => {
+        const activeChart = charts[activeChartId]
+        if (!activeChart) return null
+
+        return (
+          <CompareView
+            onClose={() => setShowCompare(false)}
+            originalNodes={activeChart.nodes}
+            originalEdges={activeChart.edges}
+            originalName={currentMeta?.name ?? 'Original'}
+            parallelNodes={currentParallel.nodes}
+            parallelEdges={currentParallel.edges}
+            parallelName="Parallel"
+            onSyncScreen={async (screenId) => { await syncScreen(activeChartId, screenId) }}
+            onSyncAll={async () => { await syncAll(activeChartId) }}
+            onDeleteParallel={handleDeleteParallel}
+          />
+        )
+      })()}
     </div>
     </PresentationContext.Provider>
   )

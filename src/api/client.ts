@@ -61,11 +61,15 @@ export const flowchartsApi = {
   list:   () => api.get('/api/flowcharts'),
   create: (name: string) => api.post('/api/flowcharts', { name }),
   get:    (id: string) => api.get(`/api/flowcharts/${id}`),
-  update: (id: string, data: { name?: string; nodes?: unknown[]; edges?: unknown[] }) =>
+  update: (id: string, data: { name?: string; nodes?: unknown[]; edges?: unknown[]; parallel_nodes?: unknown[]; parallel_edges?: unknown[] }) =>
     api.put(`/api/flowcharts/${id}`, data),
   delete:    (id: string) => api.delete(`/api/flowcharts/${id}`),
   toggleShare: (id: string) => api.post<{ share_id: string | null }>(`/api/flowcharts/${id}/share`),
   getPublic: (shareId: string) => api.get(`/api/flowcharts/public/${shareId}`),
+  makeParallel: (id: string) => api.post(`/api/flowcharts/${id}/make-parallel`),
+  deleteParallel: (id: string) => api.delete(`/api/flowcharts/${id}/parallel`),
+  syncScreen: (id: string, screenId: string) => api.post(`/api/flowcharts/${id}/sync-screen`, { screen_id: screenId }),
+  syncAll: (id: string) => api.post(`/api/flowcharts/${id}/sync-all`),
 };
 
 // Flowchart Assets (custom arrowhead images)

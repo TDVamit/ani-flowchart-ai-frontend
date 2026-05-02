@@ -34,6 +34,7 @@ export interface FlowchartMeta {
   name:       string
   created_at: string
   updated_at: string
+  has_parallel?: boolean
 }
 
 // ── Store ─────────────────────────────────────────────────────────────────────
@@ -101,6 +102,16 @@ interface FlowchartStore {
   pushHistory: () => void
   undo:        () => void
   redo:        () => void
+
+  // Parallel version (lives inside same chart document)
+  parallelData:   Record<string, { nodes: FlowNode[]; edges: FlowEdge[] }>  // chartId → parallel nodes/edges
+  makeParallel:   (chartId: string) => Promise<void>
+  deleteParallel: (chartId: string) => Promise<void>
+  saveParallel:   (chartId: string) => Promise<void>
+  updateParallelNode: (chartId: string, nodeId: string, data: Partial<ScreenData | ElementData>) => void
+  setParallelData:    (chartId: string, nodes: FlowNode[], edges: FlowEdge[]) => void
+  syncScreen:     (chartId: string, screenId: string) => Promise<void>
+  syncAll:        (chartId: string) => Promise<void>
 }
 
 function uid(prefix: string) {
@@ -129,6 +140,7 @@ export const useFlowchartStore = create<FlowchartStore>()((set, get) => ({
   levelPath:      [],
   history:        [],
   future:         [],
+  parallelData:   {},
 
   // ── Chart management ──────────────────────────────────────────────────────
 
@@ -188,8 +200,13 @@ export const useFlowchartStore = create<FlowchartStore>()((set, get) => ({
     // Always reload from API to get the freshest data (don't trust cache)
     try {
       const res = await flowchartsApi.get(id)
+      const parNodes = res.data.parallel_nodes ?? null
+      const parEdges = res.data.parallel_edges ?? null
       set((s) => ({
         charts: { ...s.charts, [id]: { nodes: res.data.nodes ?? [], edges: res.data.edges ?? [] } },
+        parallelData: parNodes
+          ? { ...s.parallelData, [id]: { nodes: parNodes, edges: parEdges ?? [] } }
+          : (() => { const d = { ...s.parallelData }; delete d[id]; return d })(),
         loading: false,
       }))
     } catch {
@@ -1170,6 +1187,84 @@ export const useFlowchartStore = create<FlowchartStore>()((set, get) => ({
       },
       selectedNodeId: null,
       selectedEdgeId: null,
+    }))
+  },
+
+  // ── Parallel version (same document) ────────────────────────────────────
+
+  makeParallel: async (chartId) => {
+    const res = await flowchartsApi.makeParallel(chartId)
+    set((s) => ({
+      parallelData: {
+        ...s.parallelData,
+        [chartId]: { nodes: res.data.parallel_nodes ?? [], edges: res.data.parallel_edges ?? [] },
+      },
+    }))
+  },
+
+  deleteParallel: async (chartId) => {
+    await flowchartsApi.deleteParallel(chartId)
+    set((s) => {
+      const d = { ...s.parallelData }
+      delete d[chartId]
+      return { parallelData: d }
+    })
+  },
+
+  saveParallel: async (chartId) => {
+    const par = get().parallelData[chartId]
+    if (!par) return
+    await flowchartsApi.update(chartId, {
+      parallel_nodes: par.nodes as unknown[],
+      parallel_edges: par.edges as unknown[],
+    })
+  },
+
+  updateParallelNode: (chartId, nodeId, data) => {
+    set((s) => {
+      const par = s.parallelData[chartId]
+      if (!par) return s
+      return {
+        parallelData: {
+          ...s.parallelData,
+          [chartId]: {
+            ...par,
+            nodes: par.nodes.map((n) =>
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              n.id === nodeId ? { ...n, data: { ...n.data, ...data } as any } : n,
+            ),
+          },
+        },
+      }
+    })
+  },
+
+  setParallelData: (chartId, nodes, edges) => {
+    set((s) => ({
+      parallelData: { ...s.parallelData, [chartId]: { nodes, edges } },
+    }))
+  },
+
+  syncScreen: async (chartId, screenId) => {
+    await flowchartsApi.syncScreen(chartId, screenId)
+    // Reload to get synced parallel data
+    const res = await flowchartsApi.get(chartId)
+    set((s) => ({
+      parallelData: {
+        ...s.parallelData,
+        [chartId]: { nodes: res.data.parallel_nodes ?? [], edges: res.data.parallel_edges ?? [] },
+      },
+    }))
+  },
+
+  syncAll: async (chartId) => {
+    await flowchartsApi.syncAll(chartId)
+    const res = await flowchartsApi.get(chartId)
+    set((s) => ({
+      parallelData: {
+        ...s.parallelData,
+        [chartId]: { nodes: res.data.parallel_nodes ?? [], edges: res.data.parallel_edges ?? [] },
+      },
     }))
   },
 }))

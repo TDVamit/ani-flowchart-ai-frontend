@@ -7,18 +7,22 @@ import { useFlowchartStore } from '../store/useFlowchartStore'
 import type { FlowNode, FlowEdge } from '../store/useFlowchartStore'
 import { AnimationPlayer } from '../components/flowchart/animation/AnimationPlayer'
 import FlowCanvas from '../components/flowchart/FlowCanvas'
+import CompareView from '../components/flowchart/CompareView'
 
-type Tab = 'preview' | 'canvas'
+type Tab = 'preview' | 'canvas' | 'compare'
 
 export default function FlowchartView() {
   const { shareId } = useParams<{ shareId: string }>()
   const location = useLocation()
   const navigate = useNavigate()
-  const tab: Tab = location.pathname.endsWith('/canvas') ? 'canvas' : 'preview'
+  const tab: Tab = location.pathname.endsWith('/canvas') ? 'canvas' : location.pathname.endsWith('/compare') ? 'compare' : 'preview'
   const [chartName, setChartName] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [ready, setReady] = useState(false)
+  const [hasParallel, setHasParallel] = useState(false)
+  const [parallelNodes, setParallelNodes] = useState<FlowNode[]>([])
+  const [parallelEdges, setParallelEdges] = useState<FlowEdge[]>([])
 
   useEffect(() => {
     if (!shareId) return
@@ -36,6 +40,14 @@ export default function FlowchartView() {
         charts: { ...s.charts, [chartId]: { nodes, edges } },
         metas: [{ id: chartId, name: data.name, created_at: data.created_at, updated_at: data.updated_at }],
       }))
+
+      // Load parallel data if present
+      if (data.parallel_nodes && data.parallel_edges) {
+        setHasParallel(true)
+        setParallelNodes(data.parallel_nodes as FlowNode[])
+        setParallelEdges(data.parallel_edges as FlowEdge[])
+      }
+
       setLoading(false)
       setReady(true)
     }).catch(() => {
@@ -87,6 +99,9 @@ export default function FlowchartView() {
         <div className="flex items-center gap-1 bg-gray-100 rounded-md p-0.5">
           <TabBtn active={tab === 'preview'} onClick={() => navigate(`/view/${shareId}/preview`, { replace: true })}>Preview</TabBtn>
           <TabBtn active={tab === 'canvas'} onClick={() => navigate(`/view/${shareId}/canvas`, { replace: true })}>Canvas</TabBtn>
+          {hasParallel && (
+            <TabBtn active={tab === 'compare'} onClick={() => navigate(`/view/${shareId}/compare`, { replace: true })}>Compare</TabBtn>
+          )}
         </div>
       </header>
 
@@ -103,6 +118,28 @@ export default function FlowchartView() {
           </div>
         </ReactFlowProvider>
       )}
+      {ready && tab === 'compare' && (() => {
+        const activeChart = useFlowchartStore.getState()
+        const chartId = activeChart.activeChartId
+        const currentChart = chartId ? activeChart.charts[chartId] : null
+        if (!currentChart || !hasParallel) return null
+
+        return (
+          <div style={{ position: 'fixed', inset: 0, paddingTop: 45 }}>
+            <CompareView
+              onClose={() => navigate(`/view/${shareId}/canvas`, { replace: true })}
+              originalNodes={currentChart.nodes}
+              originalEdges={currentChart.edges}
+              originalName={chartName}
+              parallelNodes={parallelNodes}
+              parallelEdges={parallelEdges}
+              parallelName="Parallel"
+              embedded
+              topOffset={45}
+            />
+          </div>
+        )
+      })()}
     </>
   )
 }

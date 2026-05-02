@@ -40,6 +40,7 @@ export default function App() {
       } />
       <Route path="/view/:shareId/preview" element={<FlowchartView />} />
       <Route path="/view/:shareId/canvas" element={<FlowchartView />} />
+      <Route path="/view/:shareId/compare" element={<FlowchartView />} />
 
       {/* Flowchart editor — full-screen, no sidebar */}
       <Route

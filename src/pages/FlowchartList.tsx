@@ -176,6 +176,18 @@ export default function FlowchartList() {
               </div>
             </div>
 
+            {/* Parallel badge */}
+            {meta.has_parallel && (
+              <div style={{
+                display: 'inline-block', padding: '2px 8px', marginBottom: 6,
+                background: '#fef3c7', border: '1px solid #fcd34d', borderRadius: 4,
+                fontFamily: 'IBM Plex Mono, monospace', fontSize: 9, fontWeight: 600,
+                color: '#92400e', textTransform: 'uppercase', letterSpacing: '0.06em',
+              }}>
+                Has Parallel
+              </div>
+            )}
+
             {/* Name */}
             {renamingId === meta.id ? (
               <input
