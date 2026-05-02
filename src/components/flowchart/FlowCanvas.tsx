@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   ReactFlow,
@@ -120,13 +120,20 @@ function LevelSwitcher({ allNodes, currentLevel, jumpToLevel }: {
 
   const currentIdx = availableLevels.indexOf(currentLevel)
   const total = availableLevels.length
-  const prevLevel = currentIdx > 0 ? availableLevels[currentIdx - 1] : null
-  const nextLevel = currentIdx < total - 1 ? availableLevels[currentIdx + 1] : null
 
-  // Animate only the text labels (prev, pill text, next) — not the pill shell
-  const prevRef = useRef<HTMLDivElement>(null)
+  // Neighbors: distance 1 (immediate) and distance 2 (faded)
+  const prev1 = currentIdx > 0 ? availableLevels[currentIdx - 1] : null
+  const prev2 = currentIdx > 1 ? availableLevels[currentIdx - 2] : null
+  const next1 = currentIdx < total - 1 ? availableLevels[currentIdx + 1] : null
+  const next2 = currentIdx < total - 2 ? availableLevels[currentIdx + 2] : null
+
+  // Animate text labels — not the pill shell
+  const prev2Ref = useRef<HTMLDivElement>(null)
+  const prev1Ref = useRef<HTMLDivElement>(null)
   const pillTextRef = useRef<HTMLDivElement>(null)
-  const nextRef = useRef<HTMLDivElement>(null)
+  const next1Ref = useRef<HTMLDivElement>(null)
+  const next2Ref = useRef<HTMLDivElement>(null)
+  const iconRef = useRef<HTMLElement>(null)
   const prevLevelRef = useRef(currentLevel)
 
   useEffect(() => {
@@ -134,12 +141,19 @@ function LevelSwitcher({ allNodes, currentLevel, jumpToLevel }: {
     const dir = currentLevel > prevLevelRef.current ? 'up' : 'down'
     prevLevelRef.current = currentLevel
     const cls = `ls-anim-${dir}`
-    for (const ref of [prevRef, pillTextRef, nextRef]) {
+    for (const ref of [prev2Ref, prev1Ref, pillTextRef, next1Ref, next2Ref]) {
       const el = ref.current
       if (!el) continue
       el.classList.remove('ls-anim-up', 'ls-anim-down')
       void el.offsetHeight
       el.classList.add(cls)
+    }
+    // Play lordicon animation by simulating hover trigger
+    const icon = iconRef.current as any
+    if (icon) {
+      // lordicon hover trigger listens for mouseenter/mouseleave
+      icon.dispatchEvent(new MouseEvent('mouseenter'))
+      setTimeout(() => icon.dispatchEvent(new MouseEvent('mouseleave')), 800)
     }
   }, [currentLevel])
 
@@ -147,71 +161,72 @@ function LevelSwitcher({ allNodes, currentLevel, jumpToLevel }: {
 
   const mono = 'IBM Plex Mono, monospace'
 
+  const neighborBtn = (level: number, opacity: number, scale: number, color: string, fontSize: number) => (
+    <button
+      onClick={() => jumpToLevel(level)}
+      style={{
+        border: 'none', background: 'none', cursor: 'pointer', padding: 0,
+        display: 'flex', alignItems: 'center', gap: 3,
+        opacity, transition: 'opacity 0.3s, transform 0.3s', transform: `scale(${scale})`,
+      }}
+      onMouseEnter={(e) => { e.currentTarget.style.opacity = '0.9'; e.currentTarget.style.transform = 'scale(1)' }}
+      onMouseLeave={(e) => { e.currentTarget.style.opacity = String(opacity); e.currentTarget.style.transform = `scale(${scale})` }}
+    >
+      <div style={{ width: fontSize * 0.7, height: fontSize * 0.7, borderRadius: '50%', background: color }} />
+      <span style={{ fontFamily: mono, fontSize, fontWeight: 600, color, lineHeight: 1 }}>L{level}</span>
+    </button>
+  )
+
+  // Fixed layout: neighbors are positioned relative to the current indicator
+  // so adding/removing neighbors never shifts the indicator's position
   return (
     <div style={{
       position: 'absolute', top: 12, right: 12, zIndex: 20,
-      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
+      display: 'flex', flexDirection: 'column', alignItems: 'center',
     }}>
-      {/* Previous neighbor — fixed-height slot so pill position stays constant */}
-      <div style={{ height: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-        {prevLevel !== null && (
-          <div ref={prevRef}>
-            <button
-              onClick={() => jumpToLevel(prevLevel)}
-              style={{
-                border: 'none', background: 'none', cursor: 'pointer', padding: 0,
-                display: 'flex', alignItems: 'center', gap: 4,
-                opacity: 0.55, transition: 'opacity 0.3s, transform 0.3s', transform: 'scale(0.9)',
-              }}
-              onMouseEnter={(e) => { e.currentTarget.style.opacity = '0.9'; e.currentTarget.style.transform = 'scale(1)' }}
-              onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.55'; e.currentTarget.style.transform = 'scale(0.9)' }}
-            >
-              <div style={{ width: 7, height: 7, borderRadius: '50%', background: '#818cf8' }} />
-              <span style={{ fontFamily: mono, fontSize: 9, fontWeight: 600, color: '#818cf8', lineHeight: 1 }}>L{prevLevel}</span>
-            </button>
-          </div>
-        )}
-      </div>
-
-      {/* Current level pill — shell is static, only inner text animates */}
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 5,
-        padding: '3px 8px 3px 5px', background: '#6366f1', borderRadius: 6,
-        overflow: 'hidden',
-      }}>
-        <div ref={pillTextRef} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-          <div style={{
-            width: 16, height: 16, borderRadius: 4,
-            background: 'rgba(255,255,255,0.2)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-          }}>
-            <span style={{ fontFamily: mono, fontSize: 9, fontWeight: 700, color: '#fff', lineHeight: 1 }}>{currentLevel}</span>
-          </div>
-          <span style={{ fontFamily: mono, fontSize: 9, fontWeight: 600, color: '#fff', whiteSpace: 'nowrap', lineHeight: 1, letterSpacing: '0.03em' }}>
-            L{currentLevel}
-          </span>
+      {/* Neighbors above */}
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, marginBottom: 4 }}>
+        <div style={{ height: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+          {prev2 !== null && <div ref={prev2Ref}>{neighborBtn(prev2, 0.25, 0.8, '#a5b4fc', 8)}</div>}
+        </div>
+        <div style={{ height: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+          {prev1 !== null && <div ref={prev1Ref}>{neighborBtn(prev1, 0.55, 0.92, '#818cf8', 9)}</div>}
         </div>
       </div>
 
-      {/* Next neighbor — fixed-height slot */}
-      <div style={{ height: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-        {nextLevel !== null && (
-          <div ref={nextRef}>
-            <button
-              onClick={() => jumpToLevel(nextLevel)}
-              style={{
-                border: 'none', background: 'none', cursor: 'pointer', padding: 0,
-                display: 'flex', alignItems: 'center', gap: 4,
-                opacity: 0.5, transition: 'opacity 0.3s, transform 0.3s', transform: 'scale(0.9)',
-              }}
-              onMouseEnter={(e) => { e.currentTarget.style.opacity = '0.85'; e.currentTarget.style.transform = 'scale(1)' }}
-              onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.5'; e.currentTarget.style.transform = 'scale(0.9)' }}
-            >
-              <div style={{ width: 7, height: 7, borderRadius: '50%', background: '#94a3b8' }} />
-              <span style={{ fontFamily: mono, fontSize: 9, fontWeight: 600, color: '#94a3b8', lineHeight: 1 }}>L{nextLevel}</span>
-            </button>
+      {/* Current level — indigo card with icon */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 5,
+        padding: '2px 12px 2px 6px',
+        background: '#6366f1',
+        borderRadius: 8,
+        boxShadow: '0 0 10px rgba(99, 102, 241, 0.5), 0 0 24px rgba(99, 102, 241, 0.15)',
+      }}>
+        {React.createElement('lord-icon', {
+          ref: iconRef,
+          src: 'https://cdn.lordicon.com/jectmwqf.json',
+          trigger: 'hover',
+          stroke: 'bold',
+          colors: 'primary:#ffffff,secondary:#c7d2fe',
+          style: { width: 20, height: 20, flexShrink: 0, margin: '-2px' },
+        })}
+        <div style={{ overflow: 'hidden' }}>
+          <div ref={pillTextRef}>
+            <span style={{ fontFamily: mono, fontSize: 10, fontWeight: 700, color: '#fff', whiteSpace: 'nowrap', lineHeight: 1, letterSpacing: '0.04em' }}>
+              L{currentLevel}
+            </span>
           </div>
-        )}
+        </div>
+      </div>
+
+      {/* Neighbors below */}
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, marginTop: 4 }}>
+        <div style={{ height: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+          {next1 !== null && <div ref={next1Ref}>{neighborBtn(next1, 0.5, 0.92, '#94a3b8', 9)}</div>}
+        </div>
+        <div style={{ height: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+          {next2 !== null && <div ref={next2Ref}>{neighborBtn(next2, 0.2, 0.8, '#b0bec5', 8)}</div>}
+        </div>
       </div>
     </div>
   )
@@ -357,7 +372,7 @@ function CanvasViewOverlay({ onClose }: { onClose: () => void }) {
 
       {/* Canvas */}
       <div style={{ position: 'absolute', inset: 0, paddingTop: 45 }}>
-        {/* Floating back button on canvas — outside ReactFlowProvider so it doesn't overlap header */}
+        {/* Floating back button on canvas */}
         {viewLevel > 1 && (
           <button
             onClick={handleBack}
@@ -372,15 +387,20 @@ function CanvasViewOverlay({ onClose }: { onClose: () => void }) {
             &larr; Back
           </button>
         )}
-        {/* Level overlay indicator */}
-        <div style={{
-          position: 'absolute', top: 57, right: 12, zIndex: 30,
-          padding: '5px 12px', background: 'rgba(255,255,255,0.95)', border: '1px solid #c7d2fe',
-          borderRadius: 5, fontFamily: 'IBM Plex Mono, monospace', fontSize: 10,
-          color: '#6366f1', fontWeight: 700, backdropFilter: 'blur(6px)',
-          boxShadow: '0 1px 4px rgba(0,0,0,0.08)', pointerEvents: 'none',
-        }}>
-          Level {viewLevel}{viewPath.length > 0 ? ` - ${viewPath[viewPath.length - 1].label}` : ''}
+        {/* Level switcher */}
+        <div style={{ position: 'absolute', top: 57, right: 0, zIndex: 30 }}>
+          <LevelSwitcher allNodes={allNodes} currentLevel={viewLevel} jumpToLevel={(lvl) => {
+            if (lvl < viewLevel) {
+              // Going back — trim path
+              const idx = viewPath.findIndex(e => e.level === lvl)
+              if (idx >= 0) { setViewLevel(lvl); setViewPath(viewPath.slice(0, idx + 1)) }
+              else { setViewLevel(lvl); setViewPath([]) }
+            } else {
+              setViewLevel(lvl)
+            }
+            setFitTargetId(null)
+            setFitKey(k => k + 1)
+          }} />
         </div>
         <ReactFlowProvider key={fitKey}>
           <PresentationContext.Provider value={{ presentationMode: false, nodeStates: {}, showSteps: false, showDebug: false }}>
@@ -513,8 +533,8 @@ function ReadOnlyCanvas({ allNodes, allEdges, bgVariant, topOffset = 0 }: {
 
   return (
     <PresentationContext.Provider value={{ presentationMode: false, nodeStates: {}, showSteps: false, showDebug: false }}>
-      <div style={{ position: 'absolute', inset: 0, background: '#f8fafc' }} key={fitKey}>
-        {/* Back button */}
+      <div style={{ position: 'absolute', inset: 0, background: '#f8fafc' }}>
+        {/* Back button — outside fitKey so it doesn't remount */}
         {viewLevel > 1 && (
           <button
             onClick={handleBack}
@@ -530,18 +550,23 @@ function ReadOnlyCanvas({ allNodes, allEdges, bgVariant, topOffset = 0 }: {
           </button>
         )}
 
-        {/* Level indicator overlay */}
-        <div style={{
-          position: 'absolute', top: topOffset + 12, right: 12, zIndex: 10,
-          padding: '5px 12px', background: 'rgba(255,255,255,0.95)', border: '1px solid #c7d2fe',
-          borderRadius: 5, fontFamily: 'IBM Plex Mono, monospace', fontSize: 10,
-          color: '#6366f1', fontWeight: 700, backdropFilter: 'blur(6px)',
-          boxShadow: '0 1px 4px rgba(0,0,0,0.08)', pointerEvents: 'none',
-        }}>
-          Level {viewLevel}{viewPath.length > 0 ? ` - ${viewPath[viewPath.length - 1].label}` : ''}
+        {/* Level switcher — outside fitKey so animations persist */}
+        <div style={{ position: 'absolute', top: topOffset, right: 0, zIndex: 10 }}>
+          <LevelSwitcher allNodes={allNodes} currentLevel={viewLevel} jumpToLevel={(lvl) => {
+            if (lvl < viewLevel) {
+              const idx = viewPath.findIndex(e => e.level === lvl)
+              if (idx >= 0) { setViewLevel(lvl); setViewPath(viewPath.slice(0, idx + 1)) }
+              else { setViewLevel(lvl); setViewPath([]) }
+            } else {
+              setViewLevel(lvl)
+            }
+            setFitTargetId(null)
+            setFitKey(k => k + 1)
+          }} />
         </div>
 
         <ReactFlow
+          key={fitKey}
           nodes={roNodes}
           edges={lvlEdges}
           nodeTypes={nodeTypes}
